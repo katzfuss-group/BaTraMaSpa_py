@@ -151,18 +151,20 @@ class TransportMap(torch.nn.Module):
             return loglik.sum()
 
 
-def fit_map_mini(data, NNmax, linear=False, maxIter=1e3, batsz=128, **kwargs):
+def fit_map_mini(data, NNmax, linear=False, maxIter=1e3, batsz=128,
+                 tuneParm=None, lr=1e-3, **kwargs):
     # default initial values
     thetaInit = torch.tensor([data[:, 0].square().mean().log(),
                              .2, -1.0, .0, .0, -1.0])
     if linear:
-        thetaInit = thetaInit[1:3]
-    transportMap = TransportMap(thetaInit, linear=linear, **kwargs)
-    optimizer = torch.optim.SGD(transportMap.parameters(), lr=1e-3)
+        thetaInit = thetaInit[0:3]
+    transportMap = TransportMap(thetaInit, linear=linear,
+                                tuneParm=tuneParm)
+    optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr)
     for i in range(maxIter):
         inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
         optimizer.zero_grad()
-        loss = transportMap(data, NNmax, 'intlik', inds=inds)
+        loss = transportMap(data, NNmax, 'intlik', inds=inds, **kwargs)
         loss.backward()
         optimizer.step()
         if i % 99 == 0:
