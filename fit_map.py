@@ -5,6 +5,7 @@ from torch.distributions import Normal
 from torch.distributions import MultivariateNormal
 from pyro.distributions import InverseGamma
 from torch.nn.parameter import Parameter
+from torch.distributions.studentT import StudentT
 
 
 def nug_fun(i, theta, scales):
@@ -145,8 +146,16 @@ class TransportMap(torch.nn.Module):
                            invGDist.log_prob(nuggetHat)
         if mode == 'fit':
             tuneParm = torch.tensor([self.nugMult, self.smooth])
-            return GChol, yTilde, nugMean, alphaPost, betaPost, scal, data, \
-                   data, NN, theta, tuneParm
+            return {"Chol": GChol,
+                    "yTilde": yTilde,
+                    "nugMean": nugMean,
+                    "alphaPost": alphaPost,
+                    "betaPost": betaPost,
+                    "scal": scal,
+                    "data": data,
+                    "NN": NN,
+                    "theta": theta,
+                    "tuneParm": tuneParm}
         else:
             return loglik.sum()
 
@@ -155,7 +164,7 @@ def fit_map_mini(data, NNmax, linear=False, maxIter=1e3, batsz=128,
                  tuneParm=None, lr=1e-3, **kwargs):
     # default initial values
     thetaInit = torch.tensor([data[:, 0].square().mean().log(),
-                             .2, -1.0, .0, .0, -1.0])
+                              .2, -1.0, .0, .0, -1.0])
     if linear:
         thetaInit = thetaInit[0:3]
     transportMap = TransportMap(thetaInit, linear=linear,
@@ -170,3 +179,84 @@ def fit_map_mini(data, NNmax, linear=False, maxIter=1e3, batsz=128,
         if i % 99 == 0:
             print(f"Loglikelihood {torch.neg(loss)}\n")
     return transportMap(data, NNmax, 'fit')
+
+
+def cond_samp(fit, mode, obs, xFix=torch.tensor([]), indLast=None):
+    data = fit['data']
+    NN = fit['NN']
+    theta = fit['theta']
+    scal = fit['scal']
+    nugMult = fit['tuneParm'][0]
+    smooth = fit['tuneParm'][1]
+    nugMean = fit['nugMean']
+    chol = fit['Chol']
+    yTilde = fit['yTilde']
+    betaPost = fit['betaPost']
+    alphaPost = fit['alphaPost']
+    n, N = data.shape
+    m = NN.shape[1]
+    if indLast is None:
+        indLast = N
+    # loop over variables/locations
+    xNew = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
+    for i in range(xFix.size(0), indLast):
+        # predictive distribution for current sample
+        if i == 0:
+            cStar = torch.zeros(n)
+            prVar = torch.tensor(.0)
+        else:
+            ncol = torch.minimum(i, m)
+            X = data[:, NN[i, :ncol]]
+            if mode in ['score', 'trans', 'scorepm']:
+                XPred = obs[NN[i, :ncol]].unsqueeze(0)
+            else:
+                XPred = xNew[NN[i, :ncol]].unsqueeze(0)
+            cStar = kernel_fun(XPred, theta, sigma_fun(i, theta, scal),
+                               smooth, nugMean[i], X).squeeze()
+            prVar = kernel_fun(XPred, theta, sigma_fun(i, theta, scal),
+                               smooth, nugMean[i]).squeeze()
+        cChol = torch.triangular_solve(cStar.unsqueeze(1),
+                                       chol[i, :, :],
+                                       upper=False)[0].squeeze()
+        meanPred = yTilde[i, :].mul(cChol).sum()
+        varPredNoNug = prVar - cChol.square().sum()
+        # evaluate score or sample
+        if mode == 'score':
+            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
+            STDist = StudentT(2 * alphaPost[i])
+            scr[i] = STDist.log_prob((obs[i] - meanPred) /
+                                     initVar.sqrt()) - \
+                     0.5 * initVar.log()
+        elif mode == 'scorepm':
+            nugget = betaPost[i] / alphaPost[i].sub(1)
+            uniNDist = Normal(loc=meanPred, scale=nugget.sqrt())
+            scr[i] = uniNDist.log_prob(obs[i])
+        elif mode == 'fx':
+            xNew[i] = meanPred
+        elif mode == 'freq':
+            nugget = betaPost[i] / alphaPost[i].add(1)
+            uniNDist = Normal(loc=meanPred, scale=nugget.sqrt())
+            xNew[i] = uniNDist.sample()
+        elif mode == 'bayes':
+            invGDist = InverseGamma(concentration=alphaPost[i],
+                                    rate=betaPost[i])
+            nugget = invGDist.sample()
+            uniNDist = Normal(loc=meanPred,
+                              scale=nugget.mul(1 + varPredNoNug).sqrt())
+            xNew[i] = uniNDist.sample()
+        elif mode == 'trans':
+            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
+            xStand = (obs[i] - meanPred) / initVar.sqrt()
+            STDist = StudentT(2 * alphaPost[i])
+            uniNDist = Normal()
+            xNew[i] = uniNDist.icdf(STDist.cdf(xStand))
+        elif mode == 'invtrans':
+            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
+            STDist = StudentT(2 * alphaPost[i])
+            uniNDist = Normal()
+            xNew[i] = meanPred + STDist.icdf(uniNDist.cdf(obs[i])) * \
+                      initVar.sqrt()
+    if mode in ['score', 'scorepm']:
+        return scr.sum()
+    else:
+        return xNew
