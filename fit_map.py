@@ -35,9 +35,9 @@ def con_fun(i, theta, scales):
 def m_threshold(theta, mMax):
     below = scaling_fun(torch.arange(mMax).add(1), theta) < .01
     if below.sum().equal(torch.tensor(0)):
-        m = mMax
+        m = torch.tensor(mMax)
     else:
-        m = torch.argmax(below)
+        m = torch.argmax(below.type(torch.DoubleTensor))
     return torch.maximum(m, torch.tensor(1))
 
 
@@ -50,8 +50,9 @@ def kernel_fun(X1, theta, sigma, smooth, nuggetMean=None, X2=None):
     X1s = X1.mul(scaling_fun(torch.arange(1, N + 1).unsqueeze(0), theta))
     X2s = X2.mul(scaling_fun(torch.arange(1, N + 1).unsqueeze(0), theta))
     lin = X1s @ X2s.t()
-    MaternObj = MaternKernel(smooth)._set_lengthscale(range_fun(theta))
-    nonlin = MaternObj.forward(X1s, X2s).mult(sigma.pow(2))
+    MaternObj = MaternKernel(smooth.item())
+    MaternObj._set_lengthscale(range_fun(theta))
+    nonlin = MaternObj.forward(X1s, X2s).mul(sigma.pow(2))
     return (lin + nonlin).div(nuggetMean)
 
 
@@ -157,11 +158,11 @@ class TransportMap(torch.nn.Module):
                     "theta": theta,
                     "tuneParm": tuneParm}
         else:
-            return loglik.sum()
+            return loglik.sum().neg()
 
 
-def fit_map_mini(data, NNmax, linear=False, maxIter=1e3, batsz=128,
-                 tuneParm=None, lr=1e-3, **kwargs):
+def fit_map_mini(data, NNmax, linear=False, maxIter=1000, batsz=128,
+                 tuneParm=None, lr=1e-5, **kwargs):
     # default initial values
     thetaInit = torch.tensor([data[:, 0].square().mean().log(),
                               .2, -1.0, .0, .0, -1.0])
@@ -173,11 +174,16 @@ def fit_map_mini(data, NNmax, linear=False, maxIter=1e3, batsz=128,
     for i in range(maxIter):
         inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
         optimizer.zero_grad()
-        loss = transportMap(data, NNmax, 'intlik', inds=inds, **kwargs)
+        loss = transportMap(data, NNmax, 'intlik', inds=inds,
+                            **kwargs)
+        print(f"Loglikelihood {torch.neg(loss)}\n")
+        # if i % 99 == 0:
+        #     print(f"Loglikelihood {torch.neg(loss)}\n")
         loss.backward()
         optimizer.step()
-        if i % 99 == 0:
-            print(f"Loglikelihood {torch.neg(loss)}\n")
+        print("i = ", i + 1, "\n")
+        for name, parm in transportMap.named_parameters():
+            print(name, ": ", parm.data)
     return transportMap(data, NNmax, 'fit')
 
 
@@ -260,3 +266,15 @@ def cond_samp(fit, mode, obs, xFix=torch.tensor([]), indLast=None):
         return scr.sum()
     else:
         return xNew
+
+
+# locsOdr: each row is one location
+# NN: each row represents one location
+def compute_scal(locsOdr, NN):
+    N = locsOdr.shape[0]
+    scal = (locsOdr[1:, :] - locsOdr[NN[1:, 0], :]).square().sum(1).sqrt()
+    scal = torch.cat((scal[0].square().div(scal[4]).unsqueeze(0), scal))
+    scal = scal.div(scal[0])
+    return scal
+
+
