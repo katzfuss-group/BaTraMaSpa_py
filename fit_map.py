@@ -52,7 +52,7 @@ def kernel_fun(X1, theta, sigma, smooth, nuggetMean=None, X2=None):
     lin = X1s @ X2s.t()
     MaternObj = MaternKernel(smooth.item())
     MaternObj._set_lengthscale(1.0)
-    lenScal = range_fun(theta)
+    lenScal = range_fun(theta) * smooth.mul(2).sqrt()
     nonlin = MaternObj.forward(X1s.div(lenScal), X2s.div(lenScal)).mul(sigma.pow(2))
     return (lin + nonlin).div(nuggetMean)
 
