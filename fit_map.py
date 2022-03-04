@@ -51,8 +51,9 @@ def kernel_fun(X1, theta, sigma, smooth, nuggetMean=None, X2=None):
     X2s = X2.mul(scaling_fun(torch.arange(1, N + 1).unsqueeze(0), theta))
     lin = X1s @ X2s.t()
     MaternObj = MaternKernel(smooth.item())
-    MaternObj._set_lengthscale(range_fun(theta))
-    nonlin = MaternObj.forward(X1s, X2s).mul(sigma.pow(2))
+    MaternObj._set_lengthscale(1.0)
+    lenScal = range_fun(theta)
+    nonlin = MaternObj.forward(X1s.div(lenScal), X2s.div(lenScal)).mul(sigma.pow(2))
     return (lin + nonlin).div(nuggetMean)
 
 
@@ -74,7 +75,7 @@ class TransportMap(torch.nn.Module):
             theta = torch.cat((self.theta,
                                torch.tensor([-float('inf'), .0, .0])))
         else:
-            theta = torch.tensor(self.theta)
+            theta = self.theta
         # default opt parms
         n, N = data.shape
         if m is None:
@@ -211,7 +212,7 @@ def cond_samp(fit, mode, obs, xFix=torch.tensor([]), indLast=None):
             cStar = torch.zeros(n)
             prVar = torch.tensor(.0)
         else:
-            ncol = torch.minimum(i, m)
+            ncol = min(i, m)
             X = data[:, NN[i, :ncol]]
             if mode in ['score', 'trans', 'scorepm']:
                 XPred = obs[NN[i, :ncol]].unsqueeze(0)
@@ -254,12 +255,12 @@ def cond_samp(fit, mode, obs, xFix=torch.tensor([]), indLast=None):
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             xStand = (obs[i] - meanPred) / initVar.sqrt()
             STDist = StudentT(2 * alphaPost[i])
-            uniNDist = Normal()
+            uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
             xNew[i] = uniNDist.icdf(STDist.cdf(xStand))
         elif mode == 'invtrans':
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             STDist = StudentT(2 * alphaPost[i])
-            uniNDist = Normal()
+            uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
             xNew[i] = meanPred + STDist.icdf(uniNDist.cdf(obs[i])) * \
                       initVar.sqrt()
     if mode in ['score', 'scorepm']:
@@ -276,5 +277,3 @@ def compute_scal(locsOdr, NN):
     scal = torch.cat((scal[0].square().div(scal[4]).unsqueeze(0), scal))
     scal = scal.div(scal[0])
     return scal
-
-
