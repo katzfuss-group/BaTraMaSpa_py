@@ -171,7 +171,8 @@ def fit_map_mini(data, NNmax, linear=False, maxIter=1000, batsz=128,
         thetaInit = thetaInit[0:3]
     transportMap = TransportMap(thetaInit, linear=linear,
                                 tuneParm=tuneParm)
-    optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr)
+    optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr, momentum=0.9)
+    # optimizer = torch.optim.Adam(transportMap.parameters(), lr=lr)
     for i in range(maxIter):
         inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
         optimizer.zero_grad()
@@ -185,10 +186,10 @@ def fit_map_mini(data, NNmax, linear=False, maxIter=1000, batsz=128,
         print("i = ", i + 1, "\n")
         for name, parm in transportMap.named_parameters():
             print(name, ": ", parm.data)
-    return transportMap(data, NNmax, 'fit')
+    return transportMap(data, NNmax, 'fit', **kwargs)
 
 
-def cond_samp(fit, mode, obs, xFix=torch.tensor([]), indLast=None):
+def cond_samp(fit, mode, obs=None, xFix=torch.tensor([]), indLast=None):
     data = fit['data']
     NN = fit['NN']
     theta = fit['theta']
@@ -206,7 +207,7 @@ def cond_samp(fit, mode, obs, xFix=torch.tensor([]), indLast=None):
         indLast = N
     # loop over variables/locations
     xNew = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
-    for i in range(xFix.size(0), indLast):
+    for i in range(xFix.size(0), indLast + 1):
         # predictive distribution for current sample
         if i == 0:
             cStar = torch.zeros(n)
