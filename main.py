@@ -3,6 +3,8 @@ import numpy as np
 from numpy import genfromtxt
 import fit_map
 
+torch.manual_seed(0)
+
 NN = torch.from_numpy(genfromtxt(
     '/Users/caoj/Documents/BaTraMaSpa/code/NNarray_max.csv',
     delimiter=' ', missing_values='NA', dtype=np.int)).sub(1)
