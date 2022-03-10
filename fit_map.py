@@ -82,68 +82,64 @@ class TransportMap(torch.nn.Module):
             m = m_threshold(theta, NNmax.shape[1])
         if inds is None:
             inds = torch.arange(N)
+        Nhat = inds.shape[0]
         if scal is None:
-            scal = torch.div(torch.tensor(1), torch.arange(N).add(1))
+            scal = torch.div(torch.tensor(1), torch.arange(N).add(1))  # N
         NN = NNmax[:, :m]
         # init tmp vars
-        K = torch.zeros(N, n, n)
-        G = torch.zeros(N, n, n)
-        GChol = torch.zeros(N, n, n)
-        yTilde = torch.zeros(N, n)
-        alphaPost = torch.zeros(N)
-        betaPost = torch.zeros(N)
-        loglik = torch.zeros(N)
+        K = torch.zeros(Nhat, n, n)
+        G = torch.zeros(Nhat, n, n)
+        loglik = torch.zeros(Nhat)
         # Prior vars
-        nugMean = nug_fun(torch.arange(N), theta, scal)  # N,
-        nugSd = nugMean.mul(self.nugMult)  # N,
-        alpha = nugMean.pow(2).div(nugSd.pow(2)).add(2)  # N,
-        beta = nugMean.mul(alpha.sub(1))  # N,
+        nugMean = nug_fun(inds, theta, scal)  # Nhat,
+        nugSd = nugMean.mul(self.nugMult)  # Nhat,
+        alpha = nugMean.pow(2).div(nugSd.pow(2)).add(2)  # Nhat,
+        beta = nugMean.mul(alpha.sub(1))  # Nhat,
         # nll
-        for i in inds:
-            if i == 0:
+        for i in range(Nhat):
+            if inds[i] == 0:
                 G[i, :, :] = torch.eye(n)
             else:
-                ncol = torch.minimum(i, m)
-                X = data[:, NN[i, :ncol]]  # n X ncol
-                K[i, :, :] = kernel_fun(X, theta, sigma_fun(i, theta, scal),
+                ncol = torch.minimum(inds[i], m)
+                X = data[:, NN[inds[i], :ncol]]  # n X ncol
+                K[i, :, :] = kernel_fun(X, theta, sigma_fun(inds[i], theta, scal),
                                         self.smooth, nugMean[i])  # n X n
                 G[i, :, :] = K[i, :, :] + torch.eye(n)  # n X n
         try:
-            GChol[inds, :, :] = torch.linalg.cholesky(G[inds, :, :])
+            GChol = torch.linalg.cholesky(G)
         except RuntimeError as inst:
             print(inst)
             if mode == 'fit':
                 sys.exit('chol failed')
             else:
                 return torch.tensor(float('-inf'))
-        yTilde[inds, :] = torch.triangular_solve(data[:, inds].t().unsqueeze(2),
-                                                 GChol[inds, :, :],
-                                                 upper=False)[0].squeeze()
-        alphaPost[inds] = alpha[inds].add(n / 2)  # N,
-        betaPost[inds] = beta[inds] + yTilde[inds, :].square().sum(dim=1).div(2)  # N,
+        yTilde = torch.triangular_solve(data[:, inds].t().unsqueeze(2),
+                                        GChol,
+                                        upper=False)[0].squeeze()  # Nhat X n
+        alphaPost = alpha.add(n / 2)  # Nhat,
+        betaPost = beta + yTilde.square().sum(dim=1).div(2)  # Nhat,
         if mode == 'fit':
             # variable storage has been done through batch operations
             pass
         elif mode == 'intlik':
             # integrated likelihood
-            logdet = GChol[inds, :, :].diagonal(dim1=-1, dim2=-2). \
-                log().sum(dim=1)  # nHat,
-            loglik[inds] = -logdet + alpha[inds].mul(beta[inds].log()) - \
-                           alphaPost[inds].mul(betaPost[inds].log()) + \
-                           alphaPost[inds].lgamma() - \
-                           alpha[inds].lgamma()  # nHat,
+            logdet = GChol.diagonal(dim1=-1, dim2=-2).log().sum(dim=1)  # nHat,
+            loglik = -logdet + alpha.mul(beta.log()) - \
+                           alphaPost.mul(betaPost.log()) + \
+                           alphaPost.lgamma() - \
+                           alpha.lgamma()  # nHat,
         else:
             # profile likelihood
-            nuggetHat = betaPost[inds].div(alphaPost[inds].add(1))  # nHat
-            fHat = torch.triangular_solve(K[inds, :, :],
-                                          GChol[inds, :, :],
+            nuggetHat = betaPost.div(alphaPost.add(1))  # nHat
+            fHat = torch.triangular_solve(K,
+                                          GChol,
                                           upper=False)[0]. \
-                bmm(yTilde[inds, :].unsqueeze(2)).squeeze()  # nHat X n
+                bmm(yTilde.unsqueeze(2)).squeeze()  # nHat X n
             uniNDist = Normal(loc=fHat, scale=nuggetHat.unsqueeze(1))
             mulNDist = MultivariateNormal(loc=torch.zeros(1, n),
-                                          covariance_matrix=K[inds, :, :])
-            invGDist = InverseGamma(concentration=alpha[inds], rate=beta[inds])
-            loglik[inds] = uniNDist.log_prob(data[:, inds].t()).sum(dim=1) + \
+                                          covariance_matrix=K)
+            invGDist = InverseGamma(concentration=alpha, rate=beta)
+            loglik = uniNDist.log_prob(data[:, inds].t()).sum(dim=1) + \
                            mulNDist.log_prob(fHat) + \
                            invGDist.log_prob(nuggetHat)
         if mode == 'fit':
