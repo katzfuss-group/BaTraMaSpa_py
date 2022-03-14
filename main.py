@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from numpy import genfromtxt
 import fit_map
+import maxmin
 
 torch.manual_seed(0)
 
