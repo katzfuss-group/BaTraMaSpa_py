@@ -1,25 +1,43 @@
-import torch
+
 import numpy as np
-from numpy import genfromtxt
-import fit_map
-import maxmin
+
+from maxmin import order_maxmin
+from NNarray import NN_L2
+
+
+
+n = 2500
+ns = 10
+m = 30
+d = 2
+locs = np.random.rand(n, d).astype('float32')
+odr = order_maxmin(locs)
+locs = locs[odr, :]
+NN = NN_L2(locs, m)
+
+
+"""
+Unfortunately, it seems torch and faiss are not compatible 
+in some cases, .e.g, under certain versions, OS
+So torch here is imported after NN array is constructed
+"""
+
+import torch
+from torch.distributions.multivariate_normal import MultivariateNormal
+from fit_map import fit_map_mini, compute_scal, cond_samp
+
 
 torch.manual_seed(0)
+locs = torch.from_numpy(locs)
+NN = torch.from_numpy(NN)[:, 1:]
+covM = torch.exp(-torch.cdist(locs, locs).div(2)) + torch.eye(n)
+distObj = MultivariateNormal(torch.zeros(n), covM)
+data = distObj.sample(torch.Size([ns]))
 
-NN = torch.from_numpy(genfromtxt(
-    '/Users/caoj/Documents/BaTraMaSpa/code/NNarray_max.csv',
-    delimiter=' ', missing_values='NA', dtype=np.int)).sub(1)
-locs = torch.from_numpy(genfromtxt(
-    '/Users/caoj/Documents/BaTraMaSpa/code/locs_ord.csv',
-    delimiter=' ', missing_values='NA', dtype=np.float32))
-data = torch.from_numpy(genfromtxt(
-    '/Users/caoj/Documents/BaTraMaSpa/code/data_all.csv',
-    delimiter=' ', missing_values='NA', dtype=np.float32)).\
-    transpose(-2, -1)
 
-scal = fit_map.compute_scal(locs, NN)
-fitLin = fit_map.fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=5)
-fitNonlin = fit_map.fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=5)
+scal = compute_scal(locs, NN)
+fitLin = fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=5)
+fitNonlin = fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=5)
 
 i = 79
 NNrow = NN[i, :]
@@ -39,5 +57,5 @@ with torch.no_grad():
     for k in range(nVal):
         for l in range(nVal):
             xFix[NNrow[:2]] = torch.tensor([NNVal[0, k], NNVal[1, l]])
-            fx[k, l] = fit_map.cond_samp(fitNonlin, 'fx', xFix=xFix, indLast=i)[i]
-            fxLin[k, l] = fit_map.cond_samp(fitLin, 'fx', xFix=xFix, indLast=i)[i]
+            fx[k, l] = cond_samp(fitNonlin, 'fx', xFix=xFix, indLast=i)[i]
+            fxLin[k, l] = cond_samp(fitLin, 'fx', xFix=xFix, indLast=i)[i]
