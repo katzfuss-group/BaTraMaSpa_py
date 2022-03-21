@@ -46,8 +46,8 @@ data = distObj.sample(torch.Size([ns]))
 Fit the transport map, assuming either linear or non-linear.
 ```
 scal = compute_scal(locs, NN)
-fitLin = fit_map_mini(data, NN, True, scal=scal, lr=1e-4, maxIter=50)
-fitNonlin = fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=50)
+fitLin = fit_map_mini(data, NN, linear=True, scal=scal, lr=1e-4, maxIter=50)
+fitNonlin = fit_map_mini(data, NN, linear=False, scal=scal, lr=1e-4, maxIter=50)
 ```
 
 Posterior sampling for the 80-th location.
@@ -111,8 +111,8 @@ NN = torch.from_numpy(NN)[:, 1:]
 Fit the transport map, assuming either linear or non-linear.
 ```
 scal = compute_scal(locs, NN)
-fitLin = fit_map_mini(data, NN, True, scal=scal, lr=1e-4, maxIter=100)
-fitNonlin = fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=100)
+fitLin = fit_map_mini(data, NN, linear=True, scal=scal, lr=1e-4, maxIter=100)
+fitNonlin = fit_map_mini(data, NN, linear=False, scal=scal, lr=1e-4, maxIter=100)
 ```
 
 Posterior sampling for the 80-th location.

@@ -36,8 +36,8 @@ NN = torch.from_numpy(NN)[:, 1:]
 
 
 scal = compute_scal(locs, NN)
-fitLin = fit_map_mini(data, NN, True, scal=scal, lr=1e-4, maxIter=100)
-fitNonlin = fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=100)
+fitLin = fit_map_mini(data, NN, linear=True, scal=scal, lr=1e-4, maxIter=100)
+fitNonlin = fit_map_mini(data, NN, linear=False, scal=scal, lr=1e-4, maxIter=100)
 
 
 i = 79

@@ -1,15 +1,13 @@
-
 import numpy as np
-
 from maxmin_approx import maxmin_approx
 from NNarray import NN_L2
-
 
 
 n = 2500
 ns = 10
 m = 30
 d = 2
+np.random.seed(123)
 locs = np.random.rand(n, d).astype('float32')
 odr = maxmin_approx(locs)
 locs = locs[odr, :]
@@ -36,8 +34,9 @@ data = distObj.sample(torch.Size([ns]))
 
 
 scal = compute_scal(locs, NN)
-fitLin = fit_map_mini(data, NN, True, scal=scal, lr=1e-4, maxIter=50)
-fitNonlin = fit_map_mini(data, NN, False, scal=scal, lr=1e-4, maxIter=50)
+fitLin = fit_map_mini(data, NN, linear=True, scal=scal, lr=1e-4)
+fitNonlin = fit_map_mini(data, NN, linear=False, scal=scal, lr=1e-4)
+
 
 i = 79
 NNrow = NN[i, :]

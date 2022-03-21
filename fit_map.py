@@ -106,7 +106,6 @@ class TransportMap(torch.nn.Module):
                                         self.smooth, nugMean[i])  # n X n
                 G[i, :, :] = K[i, :, :] + torch.eye(n)  # n X n
         try:
-            print(G.max())
             GChol = torch.linalg.cholesky(G)
         except RuntimeError as inst:
             print(inst)
@@ -159,8 +158,9 @@ class TransportMap(torch.nn.Module):
             return loglik.sum().neg()
 
 
-def fit_map_mini(data, NNmax, linear=False, maxIter=1000, batsz=128,
-                 tuneParm=None, lr=1e-5, **kwargs):
+def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
+                 tuneParm=None, lr=1e-5, dataTest=None, NNmaxTest=None,
+                 scalTest=None, **kwargs):
     # default initial values
     thetaInit = torch.tensor([data[:, 0].square().mean().log(),
                               .2, -1.0, .0, .0, -1.0])
@@ -169,20 +169,35 @@ def fit_map_mini(data, NNmax, linear=False, maxIter=1000, batsz=128,
     transportMap = TransportMap(thetaInit, linear=linear,
                                 tuneParm=tuneParm)
     optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr, momentum=0.9)
+    if dataTest is None:
+        dataTest = data[:, :min(data.shape[1], 5000)]
+        NNmaxTest = NNmax[:min(data.shape[1], 5000), :]
+        if scal is not None:
+            scalTest = scal[:min(data.shape[1], 5000)]
     # optimizer = torch.optim.Adam(transportMap.parameters(), lr=lr)
-    for i in range(maxIter):
-        inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
-        optimizer.zero_grad()
-        loss = transportMap(data, NNmax, 'intlik', inds=inds,
-                            **kwargs)
-        print(f"Loglikelihood {torch.neg(loss)}\n")
-        # if i % 99 == 0:
-        #     print(f"Loglikelihood {torch.neg(loss)}\n")
-        loss.backward()
-        optimizer.step()
-        print("i = ", i + 1, "\n")
+    epochIter = int(data.shape[1] / batsz)
+    for i in range(maxEpoch):
+        for j in range(epochIter):
+            inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
+            optimizer.zero_grad()
+            loss = transportMap(data, NNmax, 'intlik', inds=inds, scal=scal,
+                                **kwargs)
+            loss.backward()
+            optimizer.step()
+        print("Epoch ", i + 1, "\n")
         for name, parm in transportMap.named_parameters():
             print(name, ": ", parm.data)
+        if i == 0:
+            with torch.no_grad():
+                scrPrev = transportMap(dataTest, NNmaxTest, 'intlik', scal=scalTest)
+                print("Current test score is ", scrPrev, "\n")
+        else:
+            with torch.no_grad():
+                scrCurr = transportMap(dataTest, NNmaxTest, 'intlik', scal=scalTest)
+                print("Current test score is ", scrCurr, "\n")
+            if scrCurr > scrPrev:
+                break
+            scrPrev = scrCurr
     return transportMap(data, NNmax, 'fit', **kwargs)
 
 
