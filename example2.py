@@ -3,6 +3,7 @@ import numpy as np
 from maxmin_approx import maxmin_approx
 from NNarray import NN_L2
 
+
 data = np.genfromtxt("data/prec.csv", delimiter=',', dtype='float32')[:, 1:]
 d = 3
 n = data.shape[1]
@@ -11,6 +12,7 @@ m = 30
 
 locs = np.transpose(data[:d, :])
 data = data[d:, :]
+np.random.seed(123)
 odr = maxmin_approx(locs)
 locs = locs[odr, :]
 data = data[:, odr]

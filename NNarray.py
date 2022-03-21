@@ -1,5 +1,6 @@
 import numpy as np
 import faiss
+import warnings
 from scipy.spatial.distance import cdist
 
 
@@ -35,5 +36,7 @@ def NN_L2(locs: 'numpy.ndarray', m: 'int') -> 'numpy.ndarray':
         for i in idxLessThanI:
             NN[queryIdx[i]] = NNsub[i, lessThanI[i, :]][:m+1]
         queryIdx = np.delete(queryIdx, idxLessThanI, 0)
+    if np.any(NN[:, 0] != np.arange(n)):
+        warnings.warn("There are very close locations and NN[:, 0] != np.arange(n)\n")
     return NN
 
