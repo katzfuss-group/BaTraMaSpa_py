@@ -1,18 +1,19 @@
 
 import numpy as np
-from maxmin import order_maxmin
+from maxmin_approx import maxmin_approx
 from NNarray import NN_L2
 
-data = np.genfromtxt("data/prec20.csv", delimiter=',', dtype='float32')[:, 1:]
-n = data.shape[0]
-ns = data.shape[1] - 2
+data = np.genfromtxt("data/prec.csv", delimiter=',', dtype='float32')[:, 1:]
+d = 3
+n = data.shape[1]
+ns = data.shape[0] - 3
 m = 30
-d = 2
+
 locs = np.transpose(data[:d, :])
 data = data[d:, :]
-data = data / data.max()
-odr = order_maxmin(locs)
+odr = maxmin_approx(locs)
 locs = locs[odr, :]
+data = data[:, odr]
 NN = NN_L2(locs, m)
 
 

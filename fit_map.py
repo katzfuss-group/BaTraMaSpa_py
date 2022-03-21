@@ -106,6 +106,7 @@ class TransportMap(torch.nn.Module):
                                         self.smooth, nugMean[i])  # n X n
                 G[i, :, :] = K[i, :, :] + torch.eye(n)  # n X n
         try:
+            print(G.max())
             GChol = torch.linalg.cholesky(G)
         except RuntimeError as inst:
             print(inst)

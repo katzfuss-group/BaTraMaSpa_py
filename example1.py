@@ -1,7 +1,7 @@
 
 import numpy as np
 
-from maxmin import order_maxmin
+from maxmin_approx import maxmin_approx
 from NNarray import NN_L2
 
 
@@ -11,7 +11,7 @@ ns = 10
 m = 30
 d = 2
 locs = np.random.rand(n, d).astype('float32')
-odr = order_maxmin(locs)
+odr = maxmin_approx(locs)
 locs = locs[odr, :]
 NN = NN_L2(locs, m)
 
