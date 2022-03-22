@@ -198,7 +198,8 @@ def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
             if scrCurr > scrPrev:
                 break
             scrPrev = scrCurr
-    return transportMap(data, NNmax, 'fit', scal=scal, **kwargs)
+    with torch.no_grad():
+        return transportMap(data, NNmax, 'fit', scal=scal, **kwargs)
 
 
 def cond_samp(fit, mode, obs=None, xFix=torch.tensor([]), indLast=None):
