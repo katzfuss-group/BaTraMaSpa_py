@@ -35,6 +35,13 @@ def NN_L2(locs: 'numpy.ndarray', m: 'int') -> 'numpy.ndarray':
         idxLessThanI = np.nonzero(np.greater_equal(numLessThanI, m + 1))[0]
         for i in idxLessThanI:
             NN[queryIdx[i]] = NNsub[i, lessThanI[i, :]][:m+1]
+            if NN[queryIdx[i], 0] != queryIdx[i]:
+                try:
+                    idx = np.nonzero(NN[queryIdx[i]] == queryIdx[i])[0][0]
+                    NN[queryIdx[i], idx] = NN[queryIdx[i], 0]
+                    NN[queryIdx[i], 0] = queryIdx[i]
+                except IndexError as inst:
+                    NN[queryIdx[i], 0] = queryIdx[i]
         queryIdx = np.delete(queryIdx, idxLessThanI, 0)
     if np.any(NN[:, 0] != np.arange(n)):
         warnings.warn("There are very close locations and NN[:, 0] != np.arange(n)\n")
