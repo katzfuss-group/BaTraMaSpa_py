@@ -180,9 +180,14 @@ def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
         for j in range(epochIter):
             inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
             optimizer.zero_grad()
-            loss = transportMap(data, NNmax, 'intlik', inds=inds, scal=scal,
-                                **kwargs)
-            loss.backward()
+            try:
+                loss = transportMap(data, NNmax, 'intlik', inds=inds, scal=scal,
+                                    **kwargs)
+                loss.backward()
+            except RuntimeError as inst:
+                print("Warning: the current optimization iteration failed")
+                print(inst)
+                continue
             optimizer.step()
         print("Epoch ", i + 1, "\n")
         for name, parm in transportMap.named_parameters():
