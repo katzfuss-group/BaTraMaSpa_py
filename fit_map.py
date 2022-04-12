@@ -91,7 +91,7 @@ class TransportMap(torch.nn.Module):
         G = torch.zeros(Nhat, n, n)
         loglik = torch.zeros(Nhat)
         # Prior vars
-        nugMean = nug_fun(inds, theta, scal)  # Nhat,
+        nugMean = torch.relu(nug_fun(inds, theta, scal).sub(1e-5)).add(1e-5)  # Nhat,
         nugSd = nugMean.mul(self.nugMult)  # Nhat,
         alpha = nugMean.pow(2).div(nugSd.pow(2)).add(2)  # Nhat,
         beta = nugMean.mul(alpha.sub(1))  # Nhat,

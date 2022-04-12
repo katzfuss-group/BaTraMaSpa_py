@@ -39,7 +39,7 @@ NN = torch.from_numpy(NN)[:, 1:]
 scal = compute_scal(locs, NN)
 # fitLin = fit_map_mini(data, NN, linear=True, lr=1e-4)
 tic = time.perf_counter()
-fitNonlin = fit_map_mini(data, NN, linear=False, lr=1e-4)
+fitNonlin = fit_map_mini(data, NN, scal=scal, linear=False, lr=1e-4)
 toc = time.perf_counter()
 print(f"fit_map used {toc - tic:0.4f} seconds")
 
