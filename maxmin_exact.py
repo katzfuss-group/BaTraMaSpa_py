@@ -3,18 +3,26 @@ import maxmin_cpp
 import numpy as np
 
 def maxmin_exact(X):
-	"""PyTorch implementation of exact max min from GPvecchia:
-	https://github.com/katzfuss-group/GPvecchia/blob/master/src/MaxMin.cpp.
-	
-	X : (Nxd) torch tensor. Does not support batches. 
-	
-	returns (N,) torch tensor of location in max min ordering. """
-	if X.dim() > 2:
-		raise Exception("maxmin_exact does not support batch operations.")
-	if X.dim() < 2:
-		raise Exception("X must be a 2 dimensional tensor.")
+    """PyTorch implementation of exact max min from GPvecchia:
+    https://github.com/katzfuss-group/GPvecchia/blob/master/src/MaxMin.cpp.
 
-	return maxmin_cpp.MaxMincpp(X).type(torch.LongTensor) - 1
+    X : (Nxd) torch/numpy tensor. Does not support batches.
+
+    returns (N,) torch/numpy tensor of location in max min ordering. """
+    if isinstance(X, np.ndarray):
+        npFlag = True
+        X = torch.from_numpy(X)
+    else:
+        npFlag = False
+    if X.dim() > 2:
+        raise Exception("maxmin_exact does not support batch operations.")
+    if X.dim() < 2:
+        raise Exception("X must be a 2 dimensional tensor.")
+    if npFlag:
+        return (maxmin_cpp.MaxMincpp(X).type(torch.LongTensor) - 1).numpy()
+    else:
+        return maxmin_cpp.MaxMincpp(X).type(torch.LongTensor) - 1
+
 
 
 def _grouped_maxmin_exact(X):
