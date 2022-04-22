@@ -1,4 +1,3 @@
-
 import numpy as np
 from maxmin_approx import maxmin_approx
 from NNarray import NN_L2
@@ -24,7 +23,6 @@ Unfortunately, it seems torch and faiss are not compatible
 in some cases, .e.g, under certain versions, OS
 So torch here is imported after NN array is constructed
 """
-
 import torch
 from NNVecchia import *
 
@@ -36,9 +34,9 @@ NN = torch.from_numpy(NN)
 
 pIn = 1
 z = torch.normal(0.0, 1.0, data.shape)
-G = build_gen(m*d+m+d, 1, 1, m*d, m*d, m*d, m*d, m*d, m*d)
-D = build_dis(m*d+m+d+1, m*d, m*d, m*d, m*d, m*d, m*d)
-maxEpoch = 20
+G = build_gen(m*d+m+d, 1, 1, m*d*4, m*d*3, m*d*2, m*d*1)
+D = build_dis(m*d+m+d+1, m*d*4, m*d*3, m*d*2, m*d*1)
+maxEpoch = 50
 batsz = 128
 batszHalf = int(batsz / 2)
 epochIter = int(n / batsz)
@@ -87,15 +85,16 @@ for i in range(maxEpoch):
     print("Generator loss is", lossGen.item())
 
 nKnown = max(int(n * 0.1), m)
+nSim = 1000
 with torch.no_grad():
-    X = torch.zeros([1, (d + 1) * (m + 1)])
-    yhat = torch.zeros(n)
-    yhat[:nKnown] = data[ns-1, :nKnown]
+    X = torch.zeros([nSim, (d + 1) * (m + 1)])
+    yhat = torch.zeros([nSim, n])
+    yhat[:, :nKnown] = data[ns-1:, :nKnown].expand(nSim, -1)
     for k in range(nKnown, n):
-        X[0, :d * (m + 1)] = torch.flatten(locs[NN[k, :], :])
-        X[0, d * (m + 1):m * d + m + d] = yhat[NN[k, 1:]]
-        X[0, m * d + m + d] = z[ns-1, k]
-        yhat[k] = G(X).squeeze()
+        X[:, :d * (m + 1)] = torch.flatten(locs[NN[k, :], :]).unsqueeze(0).expand(nSim, -1)
+        X[:, d * (m + 1):m * d + m + d] = yhat[:, NN[k, 1:]]
+        X[:, m * d + m + d] = torch.normal(0.0, 1.0, (nSim,))
+        yhat[:, k] = G(X).squeeze()
 
 def inv_odr(odr):
     odrInv = np.zeros(odr.size)
@@ -104,8 +103,16 @@ def inv_odr(odr):
     return odrInv
 
 import matplotlib.pyplot as plt
+i = 0
 odrInv = inv_odr(odr).astype('int')
-ySim = yhat.numpy()[odrInv].reshape(192, 288)
+ySim = yhat.numpy()[i, odrInv].reshape(192, 288)
 yTrue = data[ns-1, :].numpy()[odrInv].reshape(192, 288)
 plt.imshow(ySim)
 plt.imshow(yTrue)
+
+np.savetxt("true_and_sim.csv",
+           torch.cat((data[ns-1:ns, odrInv],
+                      yhat[:, odrInv]), 0).transpose(0, 1).numpy(),
+           delimiter=",")
+
+
