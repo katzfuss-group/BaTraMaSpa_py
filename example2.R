@@ -72,13 +72,21 @@ cat("GP posterior sample energy score ",
 i <- 1
 samp.i <- samp[, i]
 samp.i[odr] <- samp.i
-image(matrix(samp.i, 288, 192, byrow = T))
+image(matrix(samp.i, 288, 192, byrow = F))
 
-
-
-
-
-
+# Posterior mean
+n.known <- floor(n * 0.1)
+y.pred <- predictions(locs_pred = locs[(1 + n.known) : n, ], 
+                      X_pred = matrix(0, n - n.known, 1), y_obs = y[ns, 1 : n.known], 
+                      locs_obs = locs[1 : n.known, ], X_obs = matrix(0, n.known, 1), 
+                      beta = 0, covparms = parms, covfun_name = "matern25_scaledim", 
+                      m = m)
+y.pred <- c(y[ns, 1 : n.known], y.pred)
+sqrt(mean((y.pred - y[ns,])^2))
+i <- 1
+samp.i <- samp[, i]
+samp.i[odr] <- samp.i
+image(matrix(samp.i, 288, 192, byrow = F))
 
 
 
