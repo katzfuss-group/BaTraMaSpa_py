@@ -32,16 +32,19 @@ data = torch.from_numpy(data)
 NN = torch.from_numpy(NN)
 
 modules = []
-modules.append(nn.Conv1d(d+1, 20, 5, padding='valid'))
+modules.append(nn.Conv1d(d+1, 20, 3, padding='valid'))
 modules.append(nn.ReLU())
+modules.append(nn.Conv1d(20, 20, 3, padding='valid'))
 modules.append(nn.MaxPool1d(2))
-# modules.append(nn.Dropout(0.2))
+modules.append(nn.Dropout(0.2))
 modules.append(nn.Flatten())
 modules.append(nn.Linear(260, 100))
 modules.append(nn.ReLU())
+modules.append(nn.Linear(100, 100))
+modules.append(nn.ReLU())
 modules.append(nn.Linear(100, 1))
 mdlNNVecc = nn.Sequential(*modules)
-maxEpoch = 20
+maxEpoch = 30
 batsz = 128
 epochIter = int(n / batsz)
 lr = 1e-4
