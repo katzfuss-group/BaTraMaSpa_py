@@ -81,7 +81,7 @@ y.pred <- predictions(locs_pred = locs[(1 + n.known) : n, ],
                       locs_obs = locs[1 : n.known, ], X_obs = matrix(0, n.known, 1), 
                       beta = 0, covparms = parms, covfun_name = "matern25_scaledim", 
                       m = m)
-y.pred <- c(y[ns, 1 : n.known], y.pred)
+y.pred <- c(y[ns, 1 : n.known], y.pred) # 0.3941549
 sqrt(mean((y.pred - y[ns,])^2))
 i <- 1
 samp.i <- samp[, i]
