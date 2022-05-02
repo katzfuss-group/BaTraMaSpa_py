@@ -88,7 +88,15 @@ samp.i <- samp[, i]
 samp.i[odr] <- samp.i
 image(matrix(samp.i, 288, 192, byrow = F))
 
-
-
+# Marginal sampling
+n.sim <- 1000
+n.known <- floor(n * 0.1)
+y.sim <- matrix(NA, n.known, n.sim)
+for(i in 1 : n.sim)
+    y.sim[, i] <- 
+    GpGp::fast_Gp_sim(covparms = parms, covfun_name = "matern25_scaledim",
+                      locs = locs[1 : n.known, ], m = m)
+write.table(x = cbind(y[ns, 1 : n.known], y.sim), file = "true_and_sim_R.csv", 
+            sep = ",", row.names = F, col.names = F)
 
 
