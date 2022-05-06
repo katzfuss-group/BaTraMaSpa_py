@@ -99,4 +99,14 @@ for(i in 1 : n.sim)
 write.table(x = cbind(y[ns, 1 : n.known], y.sim), file = "true_and_sim_R.csv", 
             sep = ",", row.names = F, col.names = F)
 
-
+# Marginal sampling on equtor
+n.sim <- 1000
+y.sim <- matrix(NA, sum(locs[,3] == sort(unique(locs[,3]))[96]), n.sim)
+for(i in 1 : n.sim)
+    y.sim[, i] <- 
+    GpGp::fast_Gp_sim(covparms = parms, covfun_name = "matern25_scaledim",
+                      locs = locs[locs[,3] == sort(unique(locs[,3]))[96], ], 
+                      m = m)
+write.table(x = cbind(y[ns, locs[,3] == sort(unique(locs[,3]))[96]], y.sim), 
+            file = "true_and_sim_R.csv", 
+            sep = ",", row.names = F, col.names = F)
