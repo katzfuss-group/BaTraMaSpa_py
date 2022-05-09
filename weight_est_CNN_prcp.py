@@ -6,7 +6,8 @@ from torch import nn
 import matplotlib.pyplot as plt
 
 # data processing, maxmin order and NN search
-data = np.genfromtxt("data/prec.csv", delimiter=',', dtype='float32')[:, 1:]
+# data = np.genfromtxt("data/prec.csv", delimiter=',', dtype='float32')[:, 1:]
+data = np.genfromtxt("data/temp.csv", delimiter=',', dtype='float32')
 d = 3
 n = data.shape[1]
 ns = data.shape[0]-3
@@ -42,7 +43,7 @@ modules.append(nn.Linear(10 * m, m))
 mdlNNVecc = nn.Sequential(*modules)
 
 # train NN
-maxEpoch = 20
+maxEpoch = 30
 batsz = 1024
 epochIter = int(n / batsz)
 lr = 1e-4
@@ -88,8 +89,12 @@ with torch.no_grad():
 i = 0
 odrInv = np.arange(odr.size)
 odrInv[odr] = np.arange(odr.size)
-ySim = yhat.numpy()[odrInv].reshape(192, 288)
-yTrue = data[ns-1, :].numpy()[odrInv].reshape(192, 288)
+ySim = yhat.numpy()[odrInv].reshape(torch.unique(locs[:, 2]).size(dim=0),
+                                    locs.size(dim=0) //
+                                    torch.unique(locs[:, 2]).size(dim=0))
+yTrue = data[ns-1, :].numpy()[odrInv].reshape(torch.unique(locs[:, 2]).size(dim=0),
+                                              locs.size(dim=0) //
+                                              torch.unique(locs[:, 2]).size(dim=0))
 plt.imshow(ySim)
 plt.imshow(yTrue)
 print(f"RMSE is {np.sqrt(np.square(ySim - yTrue).mean())}") # 0.3984974324703216
