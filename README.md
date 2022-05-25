@@ -1,5 +1,5 @@
 # BaTraMaSpa_py
-The Python translation of some of the R functions in the (BaTraMaSpa repository)[https://github.com/katzfuss-group/BaTraMaSpa], which implements the methods in https://arxiv.org/abs/2108.04211.
+The Python translation of some of the R functions in the [BaTraMaSpa repository](https://github.com/katzfuss-group/BaTraMaSpa), which implements the methods in https://arxiv.org/abs/2108.04211.
 The Python implementation here allows model fitting with mini-batch gradient descent based on autoDiff, and can hence be much faster than the R implementation.
 
 
