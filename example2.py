@@ -4,14 +4,17 @@ from maxmin_approx import maxmin_approx
 from NNarray import NN_L2
 
 
-data = np.genfromtxt("data/prec.csv", delimiter=',', dtype='float32')[:, 1:]
-d = 3
+# data = np.genfromtxt("data/prec.csv", delimiter=',', dtype='float32')[:, 1:]
+# d = 3
+data = np.genfromtxt("data/simNR900B.csv", delimiter=',', dtype='float32').transpose()
+d = 2
 n = data.shape[1]
-ns = data.shape[0] - 3
+ns = data.shape[0] - d
+ns = min(ns, 20)
 m = 30
 
 locs = np.transpose(data[:d, :])
-data = data[d:, :]
+data = data[d:d+ns, :]
 np.random.seed(123)
 odr = maxmin_approx(locs)
 locs = locs[odr, :]
