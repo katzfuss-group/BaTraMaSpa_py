@@ -112,6 +112,8 @@ def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=
 
 
 class TransportMap(torch.nn.Module):
+    # Initialization may need to be modified for covariates to include a longer
+    # hyperprior theta.
     def __init__(self, thetaInit, linear=False, tuneParm=None):
         super().__init__()
         if tuneParm is None:
@@ -123,27 +125,35 @@ class TransportMap(torch.nn.Module):
         self.theta = Parameter(thetaInit)
         self.linear = linear
 
-    def forward(self, data, NNmax, mode, m=None, inds=None, scal=None):
+    def forward(self, Y_data, X_data, NNmax, mode, m=None, inds=None, scal=None):
         # theta as intermediate var
         if self.linear:
-            theta = torch.cat((self.theta,
-                               torch.tensor([-float('inf'), .0, .0])))
+            theta = torch.cat((self.theta, torch.tensor([-float("inf"), 0.0, 0.0])))
         else:
             theta = self.theta
-        # default opt parms
-        n, N = data.shape
+        # Get dimensions from X_data.  Assume X is (n, N, p) and Y is (n, N).
+        # Validate assumptions by comparing the shapes of X and Y data.
+        n, N, p = X_data.shape
+
+        assert Y_data.shape == (n, N)
+
         if m is None:
             m = m_threshold(theta, NNmax.shape[1])
         if inds is None:
             inds = torch.arange(N)
+
         Nhat = inds.shape[0]
+
+        # This must be included in the kernel function.
         if scal is None:
             scal = torch.div(torch.tensor(1), torch.arange(N).add(1))  # N
+
         NN = NNmax[:, :m]
         # init tmp vars
         K = torch.zeros(Nhat, n, n)
         G = torch.zeros(Nhat, n, n)
         loglik = torch.zeros(Nhat)
+
         # Prior vars
         nugMean = torch.relu(nug_fun(inds, theta, scal).sub(1e-5)).add(1e-5)  # Nhat,
         nugSd = nugMean.mul(self.nugMult)  # Nhat,
@@ -154,60 +164,97 @@ class TransportMap(torch.nn.Module):
             if inds[i] == 0:
                 G[i, :, :] = torch.eye(n)
             else:
+                # Pick the nearest neighbors of the ith point to use in kernel.
+                # Then concatenate a vector of information at point i to the
+                # nearest neighbors for use in a kernel.
+
+                # Operation to stack the vectors will be something like
+                # torch.cat((Y_NN, X_i), dim = 1).
+
+                # Either kernel_fun should be modified to take two arguments or
+                # we should construct a vector W here. Let's go for the kernel_fun
+                # modification for now.
                 ncol = torch.minimum(inds[i], m)
-                X = data[:, NN[inds[i], :ncol]]  # n X ncol
-                K[i, :, :] = kernel_fun(X, theta, sigma_fun(inds[i], theta, scal),
-                                        self.smooth, nugMean[i])  # n X n
+                Y = Y_data[:, NN[inds[i], :ncol]]  # n X ncol
+                X = X_data[:, i]
+                K[i, :, :] = kernel_fun(
+                    Y,
+                    X,
+                    theta,
+                    sigma_fun(inds[i], theta, scal),
+                    self.smooth,
+                    nugMean[i],
+                    scal[i],
+                )  # n X n
                 G[i, :, :] = K[i, :, :] + torch.eye(n)  # n X n
         try:
             GChol = torch.linalg.cholesky(G)
         except RuntimeError as inst:
             print(inst)
-            if mode == 'fit':
-                sys.exit('chol failed')
+            if mode == "fit":
+                sys.exit("chol failed")
             else:
-                return torch.tensor(float('-inf'))
-        yTilde = torch.triangular_solve(data[:, inds].t().unsqueeze(2),
-                                        GChol,
-                                        upper=False)[0].squeeze()  # Nhat X n
+                return torch.tensor(float("-inf"))
+        # TODO: The triangular_solve function is depricated and should be replaced by
+        # the commented code below once an initial test of covariates has been
+        # completed. The implementation below should be equivalent to the original
+        # implementation.
+        yTilde = torch.triangular_solve(
+            Y_data[:, inds].t().unsqueeze(2), GChol, upper=False
+        )[
+            0
+        ].squeeze()  # Nhat X n
+        # yTilde = torch.linalg.solve_triangular(
+        #     GChol, Y_data[:, inds].t().unsqueeze(2), upper=False
+        # ).squeeze()
+
+        # TODO: confirm if we need to return an xtilde as part of the output?
         alphaPost = alpha.add(n / 2)  # Nhat,
         betaPost = beta + yTilde.square().sum(dim=1).div(2)  # Nhat,
-        if mode == 'fit':
+        if mode == "fit":
             # variable storage has been done through batch operations
             pass
-        elif mode == 'intlik':
+        elif mode == "intlik":
             # integrated likelihood
             logdet = GChol.diagonal(dim1=-1, dim2=-2).log().sum(dim=1)  # nHat,
-            loglik = -logdet + alpha.mul(beta.log()) - \
-                           alphaPost.mul(betaPost.log()) + \
-                           alphaPost.lgamma() - \
-                           alpha.lgamma()  # nHat,
+            loglik = (
+                -logdet
+                + alpha.mul(beta.log())
+                - alphaPost.mul(betaPost.log())
+                + alphaPost.lgamma()
+                - alpha.lgamma()
+            )  # nHat,
         else:
             # profile likelihood
             nuggetHat = betaPost.div(alphaPost.add(1))  # nHat
-            fHat = torch.triangular_solve(K,
-                                          GChol,
-                                          upper=False)[0]. \
-                bmm(yTilde.unsqueeze(2)).squeeze()  # nHat X n
+            fHat = (
+                torch.triangular_solve(K, GChol, upper=False)[0]
+                .bmm(yTilde.unsqueeze(2))
+                .squeeze()
+            )  # nHat X n
             uniNDist = Normal(loc=fHat, scale=nuggetHat.unsqueeze(1))
-            mulNDist = MultivariateNormal(loc=torch.zeros(1, n),
-                                          covariance_matrix=K)
+            mulNDist = MultivariateNormal(loc=torch.zeros(1, n), covariance_matrix=K)
             invGDist = InverseGamma(concentration=alpha, rate=beta)
-            loglik = uniNDist.log_prob(data[:, inds].t()).sum(dim=1) + \
-                           mulNDist.log_prob(fHat) + \
-                           invGDist.log_prob(nuggetHat)
-        if mode == 'fit':
+            loglik = (
+                uniNDist.log_prob(Y_data[:, inds].t()).sum(dim=1)
+                + mulNDist.log_prob(fHat)
+                + invGDist.log_prob(nuggetHat)
+            )
+        if mode == "fit":
             tuneParm = torch.tensor([self.nugMult, self.smooth])
-            return {"Chol": GChol,
+            return {
+                "Chol": GChol,
                     "yTilde": yTilde,
                     "nugMean": nugMean,
                     "alphaPost": alphaPost,
                     "betaPost": betaPost,
                     "scal": scal,
-                    "data": data,
+                "Y_data": Y_data,
+                "X_data": X_data,
                     "NN": NN,
                     "theta": theta,
-                    "tuneParm": tuneParm}
+                "tuneParm": tuneParm,
+            }
         else:
             return loglik.sum().neg()
 
