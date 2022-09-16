@@ -24,10 +24,12 @@ def range_fun(theta):
     return torch.exp(theta[5])
 
 
+# TODO: Confirm if this can be removed from the project.
 def varscale_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[7]).add(theta[6]))
 
 
+# TODO: Confirm if this code can be removed from the project.
 def con_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[9]).add(theta[8]))
 
