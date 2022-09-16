@@ -19,6 +19,9 @@ def scaling_fun(k, theta):
 def scaling_x(scal, theta, index0, index1):
     return scal.log().mul(theta[index1]).add(theta[index0]).exp()
 
+def linear_scaling_x(scal, theta, index0, index1):
+    return scaling_x(scal, theta, index0.sub(3), index1.sub(3))
+
 
 def sigma_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[4]).add(theta[3]))
