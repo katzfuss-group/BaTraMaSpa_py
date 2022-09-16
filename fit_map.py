@@ -16,10 +16,6 @@ def scaling_fun(k, theta):
     return torch.sqrt(torch.exp(k.mul(theta[2])))
 
 
-def scaling_x(scal, theta, index0, index1):
-    return scal.log().mul(theta[index1]).add(theta[index0]).exp()
-
-
 def sigma_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[4]).add(theta[3]))
 
@@ -45,19 +41,62 @@ def m_threshold(theta, mMax):
     return torch.maximum(m, torch.tensor(1))
 
 
-def kernel_fun(X1, theta, sigma, smooth, nuggetMean=None, X2=None):
-    N = X1.shape[1]
+# Peak where this is called to understand what the input is.
+# Calls once in TransportMap.forward and twice in cond_sample.
+def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=None):
+    # Y1 assumed n x N
+    N = Y1.shape[1]
+
+    # X1 assumed (n x N x p) with subindexing to (n x p) at the ith location
+    # (i = 0, ..., N-1).  Must construct indexing for theta_{x0} and theta_{x1}.
+    # The 6 is hard coded based on an original prior.  In the future this should
+    # all be handled by class attributes rather than hard coding.
+    n = X1.shape[0]
+    p = X1.shape[-1]
+
+    index0 = torch.arange(p).add(6)
+    index1 = torch.arange(p).add(6 + p)
+
+    # Now must force the scale to have the same shape as X1.  The scale at the
+    # ith location is the same for all n and p, and is assumed to be a scalar
+    # tensor. The scale is then expanded to have the same shape as X1.
+    if not isinstance(scal, torch.Tensor):
+        scal = torch.tensor(scal)
+    scal = scal.repeat(n, p)
+
+    # Fill in other locations if necessary.
+    if Y2 is None:
+        Y2 = Y1
     if X2 is None:
         X2 = X1
     if nuggetMean is None:
         nuggetMean = 1
-    X1s = X1.mul(scaling_fun(torch.arange(1, N + 1).unsqueeze(0), theta))
-    X2s = X2.mul(scaling_fun(torch.arange(1, N + 1).unsqueeze(0), theta))
-    lin = X1s @ X2s.t()
+
+    # Use a common index for the set of locations to reference in Y.  This works
+    # because the kernel computes distances to each point.  A different index is
+    # needed in the x case because it is not based on nearest neighbors.
+    indices = torch.arange(N).add(1).unsqueeze(0)
+    Y1s = Y1.mul(scaling_fun(indices, theta))
+    Y2s = Y2.mul(scaling_fun(indices, theta))
+
+    # This version of the map should handle a case when X is identically zero,
+    # meaning we've supplied no covariates. In this case, we should simply update
+    # X1s and X2s as zero to pass into the kernel.
+    if X1.eq(0).all():
+        X1s = torch.zeros_like(X1)
+        X2s = torch.zeros_like(X2)
+    else:
+        X1s = X1.mul(scaling_x(scal, theta, index0, index1))
+        X2s = X2.mul(scaling_x(scal, theta, index0, index1))
+
+    # Now concatenate Y and X components for use in the full kernel.
+    W1s = torch.cat((Y1s, X1s), 1)
+    W2s = torch.cat((Y2s, X2s), 1)
+    lin = W1s @ W2s.t()  # n x n
     MaternObj = MaternKernel(smooth.item())
     MaternObj._set_lengthscale(1.0)
     lenScal = range_fun(theta) * smooth.mul(2).sqrt()
-    nonlin = MaternObj.forward(X1s.div(lenScal), X2s.div(lenScal)).mul(sigma.pow(2))
+    nonlin = MaternObj.forward(W1s.div(lenScal), W2s.div(lenScal)).mul(sigma.pow(2))
     return (lin + nonlin).div(nuggetMean)
 
 
