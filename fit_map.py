@@ -16,6 +16,10 @@ def scaling_fun(k, theta):
     return torch.sqrt(torch.exp(k.mul(theta[2])))
 
 
+def scaling_x(scal, theta, index0, index1):
+    return scal.log().mul(theta[index1]).add(theta[index0]).exp()
+
+
 def sigma_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[4]).add(theta[3]))
 
@@ -23,11 +27,9 @@ def sigma_fun(i, theta, scales):
 def range_fun(theta):
     return torch.exp(theta[5])
 
-
 # TODO: Confirm if this can be removed from the project.
 def varscale_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[7]).add(theta[6]))
-
 
 # TODO: Confirm if this code can be removed from the project.
 def con_fun(i, theta, scales):
