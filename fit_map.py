@@ -308,85 +308,111 @@ def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
         return transportMap(data, NNmax, 'fit', scal=scal, **kwargs)
 
 
-def cond_samp(fit, mode, obs=None, xFix=torch.tensor([]), indLast=None):
-    data = fit['data']
-    NN = fit['NN']
-    theta = fit['theta']
-    scal = fit['scal']
-    nugMult = fit['tuneParm'][0]
-    smooth = fit['tuneParm'][1]
-    nugMean = fit['nugMean']
-    chol = fit['Chol']
-    yTilde = fit['yTilde']
-    betaPost = fit['betaPost']
-    alphaPost = fit['alphaPost']
-    n, N = data.shape
+# Modify on account of covariates
+# (must sample the length scale parameters)
+# TODO: Investigate making this an instance method of TransportMap
+def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLast=None):
+    Y_data = fit["Y_data"]
+    X_data = fit["X_data"]
+    NN = fit["NN"]
+    theta = fit["theta"]
+    scal = fit["scal"]
+    nugMult = fit["tuneParm"][0]
+    smooth = fit["tuneParm"][1]
+    nugMean = fit["nugMean"]
+    chol = fit["Chol"]
+    yTilde = fit["yTilde"]
+    betaPost = fit["betaPost"]
+    alphaPost = fit["alphaPost"]
+
+    n, N, p = X_data.shape
+    assert Y_data.shape == (n, N)
+
     m = NN.shape[1]
     if indLast is None:
         indLast = N
+
     # loop over variables/locations
-    xNew = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
+    y_new = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
     for i in range(xFix.size(0), indLast + 1):
         # predictive distribution for current sample
         if i == 0:
             cStar = torch.zeros(n)
-            prVar = torch.tensor(.0)
+            prVar = torch.tensor(0.0)
         else:
             ncol = min(i, m)
-            X = data[:, NN[i, :ncol]]
-            if mode in ['score', 'trans', 'scorepm']:
-                XPred = obs[NN[i, :ncol]].unsqueeze(0)
+            Y = Y_data[:, NN[i, :ncol]]
+            X = X_data[:, i]
+            if mode in ["score", "trans", "scorepm"]:
+                Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0)
+                X_pred = X_obs
             else:
-                XPred = xNew[NN[i, :ncol]].unsqueeze(0)
-            cStar = kernel_fun(XPred, theta, sigma_fun(i, theta, scal),
-                               smooth, nugMean[i], X).squeeze()
-            prVar = kernel_fun(XPred, theta, sigma_fun(i, theta, scal),
-                               smooth, nugMean[i]).squeeze()
-        cChol = torch.triangular_solve(cStar.unsqueeze(1),
-                                       chol[i, :, :],
-                                       upper=False)[0].squeeze()
+                Y_pred = y_new[NN[i, :ncol]].unsqueeze(0)
+                X_pred = X
+            cStar = kernel_fun(
+                Y_pred,
+                X_pred,
+                theta,
+                sigma_fun(i, theta, scal),
+                smooth,
+                scal,
+                nugMean[i],
+                Y2=Y,
+                X2=X,
+            ).squeeze()
+            prVar = kernel_fun(
+                Y_pred,
+                X_pred,
+                theta,
+                sigma_fun(i, theta, scal),
+                smooth,
+                nugMean[i],
+            ).squeeze()
+        # TODO: Copy the updated linalg.solve_triangular solution from above
+        # to fix FutureWarnings about triangular_solve.
+        cChol = torch.triangular_solve(cStar.unsqueeze(1), chol[i, :, :], upper=False)[
+            0
+        ].squeeze()
         meanPred = yTilde[i, :].mul(cChol).sum()
         varPredNoNug = prVar - cChol.square().sum()
         # evaluate score or sample
-        if mode == 'score':
+        if mode == "score":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             STDist = StudentT(2 * alphaPost[i])
-            scr[i] = STDist.log_prob((obs[i] - meanPred) /
-                                     initVar.sqrt()) - \
-                     0.5 * initVar.log()
-        elif mode == 'scorepm':
+            scr[i] = (
+                STDist.log_prob((obs[i] - meanPred) / initVar.sqrt())
+                - 0.5 * initVar.log()
+            )
+        elif mode == "scorepm":
             nugget = betaPost[i] / alphaPost[i].sub(1)
             uniNDist = Normal(loc=meanPred, scale=nugget.sqrt())
             scr[i] = uniNDist.log_prob(obs[i])
-        elif mode == 'fx':
-            xNew[i] = meanPred
-        elif mode == 'freq':
+        elif mode == "fx":
+            y_new[i] = meanPred
+        elif mode == "freq":
             nugget = betaPost[i] / alphaPost[i].add(1)
             uniNDist = Normal(loc=meanPred, scale=nugget.sqrt())
-            xNew[i] = uniNDist.sample()
-        elif mode == 'bayes':
-            invGDist = InverseGamma(concentration=alphaPost[i],
-                                    rate=betaPost[i])
+            y_new[i] = uniNDist.sample()
+        elif mode == "bayes":
+            invGDist = InverseGamma(concentration=alphaPost[i], rate=betaPost[i])
             nugget = invGDist.sample()
-            uniNDist = Normal(loc=meanPred,
-                              scale=nugget.mul(1 + varPredNoNug).sqrt())
-            xNew[i] = uniNDist.sample()
-        elif mode == 'trans':
+            uniNDist = Normal(loc=meanPred, scale=nugget.mul(1 + varPredNoNug).sqrt())
+            y_new[i] = uniNDist.sample()
+        elif mode == "trans":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             xStand = (obs[i] - meanPred) / initVar.sqrt()
             STDist = StudentT(2 * alphaPost[i])
             uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            xNew[i] = uniNDist.icdf(STDist.cdf(xStand))
-        elif mode == 'invtrans':
+            y_new[i] = uniNDist.icdf(STDist.cdf(xStand))
+        elif mode == "invtrans":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             STDist = StudentT(2 * alphaPost[i])
             uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            xNew[i] = meanPred + STDist.icdf(uniNDist.cdf(obs[i])) * \
-                      initVar.sqrt()
-    if mode in ['score', 'scorepm']:
+            y_new[i] = meanPred + STDist.icdf(uniNDist.cdf(obs[i])) * initVar.sqrt()
+    if mode in ["score", "scorepm"]:
         return scr.sum()
     else:
-        return xNew
+        return y_new
 
 
 # locsOdr: each row is one location
