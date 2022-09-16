@@ -7,13 +7,17 @@ from pyro.distributions import InverseGamma
 from torch.nn.parameter import Parameter
 from torch.distributions.studentT import StudentT
 
-
+# region: help-functions
 def nug_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[1]).add(theta[0]))
 
 
 def scaling_fun(k, theta):
     return torch.sqrt(torch.exp(k.mul(theta[2])))
+
+
+def scaling_x(scal, theta, index0, index1):
+    return scal.log().mul(theta[index1]).add(theta[index0]).exp()
 
 
 def sigma_fun(i, theta, scales):
@@ -23,9 +27,11 @@ def sigma_fun(i, theta, scales):
 def range_fun(theta):
     return torch.exp(theta[5])
 
+
 # TODO: Confirm if this can be removed from the project.
 def varscale_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[7]).add(theta[6]))
+
 
 # TODO: Confirm if this code can be removed from the project.
 def con_fun(i, theta, scales):
@@ -33,7 +39,9 @@ def con_fun(i, theta, scales):
 
 
 def m_threshold(theta, mMax):
-    below = scaling_fun(torch.arange(mMax).add(1), theta) < .01
+    below = scaling_fun(torch.arange(mMax).add(1), theta) < 0.01
+    # Switch these cases around.  The test is equivalent to below.all() == False.
+    # A more clear statement will be easier to understand (and maintain).
     if below.sum().equal(torch.tensor(0)):
         m = torch.tensor(mMax)
     else:
@@ -98,6 +106,9 @@ def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=
     lenScal = range_fun(theta) * smooth.mul(2).sqrt()
     nonlin = MaternObj.forward(W1s.div(lenScal), W2s.div(lenScal)).mul(sigma.pow(2))
     return (lin + nonlin).div(nuggetMean)
+
+
+# endregion: help-functions
 
 
 class TransportMap(torch.nn.Module):
