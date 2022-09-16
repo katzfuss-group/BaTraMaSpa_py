@@ -54,7 +54,7 @@ def m_threshold(theta, mMax):
 
 # Peak where this is called to understand what the input is.
 # Calls once in TransportMap.forward and twice in cond_sample.
-def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=None):
+def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=None, linear=False):
     # Y1 assumed n x N
     N = Y1.shape[1]
 
@@ -97,9 +97,13 @@ def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=
         X1s = torch.zeros_like(X1)
         X2s = torch.zeros_like(X2)
     else:
-        X1s = X1.mul(scaling_x(scal, theta, index0, index1))
-        X2s = X2.mul(scaling_x(scal, theta, index0, index1))
-
+        if linear:
+            X1s = X1.mul(scaling_x(scal, theta, index0, index1))
+            X2s = X2.mul(scaling_x(scal, theta, index0, index1))
+        else:
+            X1s = X1.mul(linear_scaling_x(scal, theta, index0, index1))
+            X2s = X2.mul(linear_scaling_x(scal, theta, index0, index1))
+    
     # Now concatenate Y and X components for use in the full kernel.
     W1s = torch.cat((Y1s, X1s), 1)
     W2s = torch.cat((Y2s, X2s), 1)
@@ -186,8 +190,9 @@ class TransportMap(torch.nn.Module):
                     theta,
                     sigma_fun(inds[i], theta, scal),
                     self.smooth,
-                    nugMean[i],
                     scal[i],
+                    nugMean[i],
+                    linear = self.linear
                 )  # n X n
                 G[i, :, :] = K[i, :, :] + torch.eye(n)  # n X n
         try:
@@ -247,46 +252,89 @@ class TransportMap(torch.nn.Module):
             tuneParm = torch.tensor([self.nugMult, self.smooth])
             return {
                 "Chol": GChol,
-                    "yTilde": yTilde,
-                    "nugMean": nugMean,
-                    "alphaPost": alphaPost,
-                    "betaPost": betaPost,
-                    "scal": scal,
+                "yTilde": yTilde,
+                "nugMean": nugMean,
+                "alphaPost": alphaPost,
+                "betaPost": betaPost,
+                "scal": scal,
                 "Y_data": Y_data,
                 "X_data": X_data,
-                    "NN": NN,
-                    "theta": theta,
+                "NN": NN,
+                "theta": theta,
                 "tuneParm": tuneParm,
             }
         else:
             return loglik.sum().neg()
 
 
-def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
-                 tuneParm=None, lr=1e-5, dataTest=None, NNmaxTest=None,
-                 scalTest=None, **kwargs):
+# This must be modified on account of covariates
+# TODO: Investigate making this an instance method of TransportMap
+def fit_map_mini(
+    Y_data,
+    X_data,
+    NNmax,
+    scal=None,
+    linear=False,
+    maxEpoch=10,
+    batch_size=128,
+    tuneParm=None,
+    lr=1e-5,
+    Y_dataTest=None,
+    X_dataTest=None,
+    NNmaxTest=None,
+    scalTest=None,
+    **kwargs
+):
+    # Assume X_data.shape = [p, n, N] or [n, N] in the p=1 case
+    p = 1 if len(X_data.shape) == 2 else X_data.shape[0]
     # default initial values
-    thetaInit = torch.tensor([data[:, 0].square().mean().log(),
-                              .2, -1.0, .0, .0, -1.0])
+    thetaInit = torch.tensor(
+        # TODO:
+        # Revisit this instantiation. How does it work if we use the linear flag?
+        # In the linear case we concatenate theta with [-inf, 0, 0], so the
+        # input theta should be fine.
+        # This should be deparsed into two separate constructors
+        # rather than handled as control flow.
+        [
+            Y_data[:, 0].square().mean().log(), 0.2, #\theta_sigma hypers
+            -1.0, 0.0, #\theta_d hypers
+            0.0, # range param hyper
+            -1.0, # nugget hyper
+            X_data.mean(0).mean(0).log(), # x0 hypers assumed to act like locations
+            X_data.mean(0).std(0).log() # x1 hypers assumed to act like scales
+        ]
+    )
     if linear:
-        thetaInit = thetaInit[0:3]
-    transportMap = TransportMap(thetaInit, linear=linear,
-                                tuneParm=tuneParm)
+        # Must keep the x parameters when subsetting for a linear fit.
+        # Temporarily store parameters in a list, then replace it
+        _theta_init_size = thetaInit.shape[0]
+        _linear_subset = [0, 1, 2] + list(range(6, _theta_init_size))
+        thetaInit = thetaInit[_linear_subset]
+
+        # Destroy these variables after recreating the linear theta
+        del (_theta_init_size, _linear_subset)
+
+    transportMap = TransportMap(thetaInit, linear=linear, tuneParm=tuneParm)
     optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr, momentum=0.9)
-    if dataTest is None:
-        dataTest = data[:, :min(data.shape[1], 5000)]
-        NNmaxTest = NNmax[:min(data.shape[1], 5000), :]
+    if Y_dataTest is None:
+        Y_dataTest = Y_data[:, : min(Y_data.shape[1], 5000)]
+        NNmaxTest = NNmax[: min(Y_data.shape[1], 5000), :]
         if scal is not None:
-            scalTest = scal[:min(data.shape[1], 5000)]
+            scalTest = scal[: min(Y_data.shape[1], 5000)]
+
+    if X_dataTest is None:
+        X_dataTest = X_data[:, : min(X_data.shape[1], 5000), :]
+
     # optimizer = torch.optim.Adam(transportMap.parameters(), lr=lr)
-    epochIter = int(data.shape[1] / batsz)
+    epochIter = int(Y_data.shape[1] / batch_size)
     for i in range(maxEpoch):
         for j in range(epochIter):
-            inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
+            inds = torch.multinomial(torch.ones(Y_data.shape[1]), batch_size)
             optimizer.zero_grad()
             try:
-                loss = transportMap(data, NNmax, 'intlik', inds=inds, scal=scal,
-                                    **kwargs)
+                loss = transportMap(
+                    Y_data, X_data, NNmax, "intlik", inds=inds, scal=scal, **kwargs
+                )
                 loss.backward()
             except RuntimeError as inst:
                 print("Warning: the current optimization iteration failed")
@@ -298,16 +346,19 @@ def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
             print(name, ": ", parm.data)
         if i == 0:
             with torch.no_grad():
-                scrPrev = transportMap(dataTest, NNmaxTest, 'intlik', scal=scalTest)
+                scrPrev = transportMap(Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest)
                 print("Current test score is ", scrPrev, "\n")
         else:
             with torch.no_grad():
-                scrCurr = transportMap(dataTest, NNmaxTest, 'intlik', scal=scalTest)
+                scrCurr = transportMap(Y_dataTest, NNmaxTest, "intlik", scal=scalTest)
                 print("Current test score is ", scrCurr, "\n")
             if scrCurr > scrPrev:
                 break
             scrPrev = scrCurr
     with torch.no_grad():
+        return transportMap(Y_data, X_data, NNmax, "fit", scal=scal, **kwargs)
+
+
 # Modify on account of covariates
 # (must sample the length scale parameters)
 # TODO: Investigate making this an instance method of TransportMap
@@ -328,25 +379,25 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
     n, N, p = X_data.shape
     assert Y_data.shape == (n, N)
 
-    smooth = fit["tuneParm"][1]
-    nugMean = fit["nugMean"]
-    chol = fit["Chol"]
-
-    yTilde = fit["yTilde"]
-    y_new = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
-    alphaPost = fit["alphaPost"]
-
-    n, N, p = X_data.shape
-    assert Y_data.shape == (n, N)
-            prVar = torch.tensor(0.0)
     m = NN.shape[1]
     if indLast is None:
+        indLast = N
+
+    # loop over variables/locations
+    y_new = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
+    for i in range(xFix.size(0), indLast + 1):
+        # predictive distribution for current sample
+        if i == 0:
+            cStar = torch.zeros(n)
+            prVar = torch.tensor(0.0)
+        else:
+            ncol = min(i, m)
             Y = Y_data[:, NN[i, :ncol]]
             X = X_data[:, i]
             if mode in ["score", "trans", "scorepm"]:
                 Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0)
                 X_pred = X_obs
-    y_new = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
+            else:
                 Y_pred = y_new[NN[i, :ncol]].unsqueeze(0)
                 X_pred = X
             cStar = kernel_fun(
@@ -376,46 +427,17 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
         cChol = torch.triangular_solve(cStar.unsqueeze(1), chol[i, :, :], upper=False)[
             0
         ].squeeze()
-            X = X_data[:, i]
-            if mode in ["score", "trans", "scorepm"]:
-                Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0)
+        meanPred = yTilde[i, :].mul(cChol).sum()
+        varPredNoNug = prVar - cChol.square().sum()
+        # evaluate score or sample
         if mode == "score":
-            else:
-                Y_pred = y_new[NN[i, :ncol]].unsqueeze(0)
+            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
+            STDist = StudentT(2 * alphaPost[i])
             scr[i] = (
                 STDist.log_prob((obs[i] - meanPred) / initVar.sqrt())
                 - 0.5 * initVar.log()
             )
         elif mode == "scorepm":
-                theta,
-                sigma_fun(i, theta, scal),
-                smooth,
-        elif mode == "fx":
-            y_new[i] = meanPred
-        elif mode == "freq":
-                X2=X,
-            ).squeeze()
-            y_new[i] = uniNDist.sample()
-        elif mode == "bayes":
-            invGDist = InverseGamma(concentration=alphaPost[i], rate=betaPost[i])
-                sigma_fun(i, theta, scal),
-            uniNDist = Normal(loc=meanPred, scale=nugget.mul(1 + varPredNoNug).sqrt())
-            y_new[i] = uniNDist.sample()
-        elif mode == "trans":
-        # to fix FutureWarnings about triangular_solve.
-        cChol = torch.triangular_solve(cStar.unsqueeze(1), chol[i, :, :], upper=False)[
-            0
-        ].squeeze()
-            y_new[i] = uniNDist.icdf(STDist.cdf(xStand))
-        elif mode == "invtrans":
-        # evaluate score or sample
-        if mode == "score":
-            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
-            y_new[i] = meanPred + STDist.icdf(uniNDist.cdf(obs[i])) * initVar.sqrt()
-    if mode in ["score", "scorepm"]:
-                - 0.5 * initVar.log()
-            )
-        return y_new
             nugget = betaPost[i] / alphaPost[i].sub(1)
             uniNDist = Normal(loc=meanPred, scale=nugget.sqrt())
             scr[i] = uniNDist.log_prob(obs[i])
