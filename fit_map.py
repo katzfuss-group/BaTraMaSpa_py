@@ -183,7 +183,7 @@ class TransportMap(torch.nn.Module):
                 # modification for now.
                 ncol = torch.minimum(inds[i], m)
                 Y = Y_data[:, NN[inds[i], :ncol]]  # n X ncol
-                X = X_data[:, i]
+                X = X_data[:, i, :]
                 K[i, :, :] = kernel_fun(
                     Y,
                     X,
@@ -262,6 +262,7 @@ class TransportMap(torch.nn.Module):
                 "NN": NN,
                 "theta": theta,
                 "tuneParm": tuneParm,
+                "linear": self.linear
             }
         else:
             return loglik.sum().neg()
@@ -300,8 +301,8 @@ def fit_map_mini(
             -1.0, 0.0, #\theta_d hypers
             0.0, # range param hyper
             -1.0, # nugget hyper
-            X_data.mean(0).mean(0).log(), # x0 hypers assumed to act like locations
-            X_data.mean(0).std(0).log() # x1 hypers assumed to act like scales
+            X_data.mean(0).mean(0), # x0 hypers assumed to act like locations
+            X_data.mean(0).std(0) # x1 hypers assumed to act like scales
         ]
     )
     if linear:
@@ -350,7 +351,7 @@ def fit_map_mini(
                 print("Current test score is ", scrPrev, "\n")
         else:
             with torch.no_grad():
-                scrCurr = transportMap(Y_dataTest, NNmaxTest, "intlik", scal=scalTest)
+                scrCurr = transportMap(Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest)
                 print("Current test score is ", scrCurr, "\n")
             if scrCurr > scrPrev:
                 break
@@ -393,13 +394,16 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
         else:
             ncol = min(i, m)
             Y = Y_data[:, NN[i, :ncol]]
-            X = X_data[:, i]
+            X = X_data[:, i, :]
             if mode in ["score", "trans", "scorepm"]:
                 Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0)
-                X_pred = X_obs
+                X_pred = X_obs.unsqueeze(0)
             else:
                 Y_pred = y_new[NN[i, :ncol]].unsqueeze(0)
                 X_pred = X
+            # This code is breaking when calling kernel_fun due to a concatenation
+            # error. In troubleshooting, get Y (1 x 15) and X (10 x 1) subsets.
+            # Troubleshooting is over a modified version of example1.py.
             cStar = kernel_fun(
                 Y_pred,
                 X_pred,
@@ -434,13 +438,13 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             STDist = StudentT(2 * alphaPost[i])
             scr[i] = (
-                STDist.log_prob((obs[i] - meanPred) / initVar.sqrt())
+                STDist.log_prob((Y_obs[i] - meanPred) / initVar.sqrt())
                 - 0.5 * initVar.log()
             )
         elif mode == "scorepm":
             nugget = betaPost[i] / alphaPost[i].sub(1)
             uniNDist = Normal(loc=meanPred, scale=nugget.sqrt())
-            scr[i] = uniNDist.log_prob(obs[i])
+            scr[i] = uniNDist.log_prob(Y_obs[i])
         elif mode == "fx":
             y_new[i] = meanPred
         elif mode == "freq":
@@ -462,7 +466,7 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             STDist = StudentT(2 * alphaPost[i])
             uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            y_new[i] = meanPred + STDist.icdf(uniNDist.cdf(obs[i])) * initVar.sqrt()
+            y_new[i] = meanPred + STDist.icdf(uniNDist.cdf(Y_obs[i])) * initVar.sqrt()
     if mode in ["score", "scorepm"]:
         return scr.sum()
     else:

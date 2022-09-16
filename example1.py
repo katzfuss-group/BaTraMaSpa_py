@@ -30,12 +30,13 @@ locs = torch.from_numpy(locs)
 NN = torch.from_numpy(NN)[:, 1:]
 covM = torch.exp(-torch.cdist(locs, locs).div(2)) + torch.eye(n)
 distObj = MultivariateNormal(torch.zeros(n), covM)
+X = torch.zeros(ns, n, 1)
 data = distObj.sample(torch.Size([ns]))
 
 
 scal = compute_scal(locs, NN)
-fitLin = fit_map_mini(data, NN, linear=True, scal=scal, lr=1e-4)
-fitNonlin = fit_map_mini(data, NN, linear=False, scal=scal, lr=1e-4)
+# fitLin = fit_map_mini(data, X, NN, linear=True, scal=scal, lr=1e-4)
+fitNonlin = fit_map_mini(data, X, NN, linear=False, scal=scal, lr=1e-4)
 
 
 i = 79
