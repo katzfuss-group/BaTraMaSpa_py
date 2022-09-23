@@ -35,7 +35,7 @@ data = distObj.sample(torch.Size([ns]))
 
 
 scal = compute_scal(locs, NN)
-# fitLin = fit_map_mini(data, X, NN, linear=True, scal=scal, lr=1e-4)
+fitLin = fit_map_mini(data, X, NN, linear=True, scal=scal, lr=1e-4)
 fitNonlin = fit_map_mini(data, X, NN, linear=False, scal=scal, lr=1e-4)
 
 
@@ -54,12 +54,12 @@ NNVal[1, :] = torch.linspace(start=data[:, NNrow[1]].min(dim=0).values,
                              steps=nVal)
 fx = torch.zeros(nVal, nVal)
 fxLin = torch.zeros(nVal, nVal)
-with torch.no_grad():
-    for k in range(nVal):
-        for l in range(nVal):
-            Y_fix[NNrow[:2]] = torch.tensor([NNVal[0, k], NNVal[1, l]])
-            fx[k, l] = cond_samp(fitNonlin, 'fx', Y_fix=Y_fix, indLast=i)[i]
-            # fxLin[k, l] = cond_samp(fitLin, 'fx', xFix=xFix, indLast=i)[i]
+# with torch.no_grad():
+#     for k in range(nVal):
+#         for l in range(nVal):
+#             Y_fix[NNrow[:2]] = torch.tensor([NNVal[0, k], NNVal[1, l]])
+#             fx[k, l] = cond_samp(fitNonlin, 'fx', Y_fix=Y_fix, indLast=i)[i]
+#             fxLin[k, l] = cond_samp(fitLin, 'fx', xFix=xFix, indLast=i)[i]
 
 
 import matplotlib.pyplot as plt
