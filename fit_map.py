@@ -19,6 +19,7 @@ def scaling_fun(k, theta):
 def scaling_x(scal, theta, index0, index1):
     return scal.log().mul(theta[index1]).add(theta[index0]).exp()
 
+
 def linear_scaling_x(scal, theta, index0, index1):
     return scaling_x(scal, theta, index0.sub(3), index1.sub(3))
 
@@ -54,7 +55,9 @@ def m_threshold(theta, mMax):
 
 # Peak where this is called to understand what the input is.
 # Calls once in TransportMap.forward and twice in cond_sample.
-def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=None, linear=False):
+def kernel_fun(
+    Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=None, linear=False
+):
     # Y1 assumed n x N
     N = Y1.shape[1]
 
@@ -103,7 +106,7 @@ def kernel_fun(Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=
         else:
             X1s = X1.mul(linear_scaling_x(scal, theta, index0, index1))
             X2s = X2.mul(linear_scaling_x(scal, theta, index0, index1))
-    
+
     # Now concatenate Y and X components for use in the full kernel.
     W1s = torch.cat((Y1s, X1s), 1)
     W2s = torch.cat((Y2s, X2s), 1)
@@ -192,7 +195,7 @@ class TransportMap(torch.nn.Module):
                     self.smooth,
                     scal[i],
                     nugMean[i],
-                    linear = self.linear
+                    linear=self.linear,
                 )  # n X n
                 G[i, :, :] = K[i, :, :] + torch.eye(n)  # n X n
         try:
@@ -262,7 +265,7 @@ class TransportMap(torch.nn.Module):
                 "NN": NN,
                 "theta": theta,
                 "tuneParm": tuneParm,
-                "linear": self.linear
+                "linear": self.linear,
             }
         else:
             return loglik.sum().neg()
@@ -297,12 +300,15 @@ def fit_map_mini(
         # This should be deparsed into two separate constructors
         # rather than handled as control flow.
         [
-            Y_data[:, 0].square().mean().log(), 0.2, #\theta_sigma hypers
-            -1.0, 0.0, #\theta_d hypers
-            0.0, # range param hyper
-            -1.0, # nugget hyper
-            X_data.mean(0).mean(0), # x0 hypers assumed to act like locations
-            X_data.mean(0).std(0) # x1 hypers assumed to act like scales
+            Y_data[:, 0].square().mean().log(),
+            0.2,  # \theta_sigma hypers
+            -1.0,
+            0.0,  # \theta_d hypers
+            0.0,  # range param hyper
+            -1.0,  # nugget hyper
+            # Use Relu function to threshold negative (namely -inf) values:
+            X_data.amax(0).amax(0).sub(X_data.amin(0).amin(0)).div(5).log().relu(),
+            torch.zeros(X_data.shape[-1]),
         ]
     )
     if linear:
@@ -347,11 +353,15 @@ def fit_map_mini(
             print(name, ": ", parm.data)
         if i == 0:
             with torch.no_grad():
-                scrPrev = transportMap(Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest)
+                scrPrev = transportMap(
+                    Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest
+                )
                 print("Current test score is ", scrPrev, "\n")
         else:
             with torch.no_grad():
-                scrCurr = transportMap(Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest)
+                scrCurr = transportMap(
+                    Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest
+                )
                 print("Current test score is ", scrCurr, "\n")
             if scrCurr > scrPrev:
                 break
@@ -363,7 +373,14 @@ def fit_map_mini(
 # Modify on account of covariates
 # (must sample the length scale parameters)
 # TODO: Investigate making this an instance method of TransportMap
-def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLast=None):
+def cond_samp(
+    fit,
+    mode,
+    Y_obs=None,
+    X_obs=None,
+    Y_fix=torch.tensor([]),
+    indLast=None,
+):
     Y_data = fit["Y_data"]
     X_data = fit["X_data"]
     NN = fit["NN"]
@@ -385,22 +402,22 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
         indLast = N
 
     # loop over variables/locations
-    y_new = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
-    for i in range(xFix.size(0), indLast + 1):
+    y_new = scr = torch.cat((Y_fix, torch.zeros(N - Y_fix.size(0))))
+    for i in range(Y_fix.size(0), indLast + 1):
         # predictive distribution for current sample
         if i == 0:
             cStar = torch.zeros(n)
             prVar = torch.tensor(0.0)
         else:
             ncol = min(i, m)
-            Y = Y_data[:, NN[i, :ncol]]
-            X = X_data[:, i, :]
+            Y = Y_data[:, NN[i, :ncol]] # [n, ncol]
+            X = X_data[:, i, :] # [n, p]
             if mode in ["score", "trans", "scorepm"]:
-                Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0)
-                X_pred = X_obs.unsqueeze(0)
+                Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0) # []
+                X_pred = X_obs[:, i, :]
             else:
                 Y_pred = y_new[NN[i, :ncol]].unsqueeze(0)
-                X_pred = X
+                X_pred = X.mean(dim = 0).unsqueeze(0)
             # This code is breaking when calling kernel_fun due to a concatenation
             # error. In troubleshooting, get Y (1 x 15) and X (10 x 1) subsets.
             # Troubleshooting is over a modified version of example1.py.
@@ -414,7 +431,7 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
                 nugMean[i],
                 Y2=Y,
                 X2=X,
-                linear = fit["linear"]
+                linear=fit["linear"],
             ).squeeze()
             prVar = kernel_fun(
                 Y_pred,
@@ -424,7 +441,7 @@ def cond_samp(fit, mode, Y_obs=None, X_obs = None, xFix=torch.tensor([]), indLas
                 smooth,
                 scal,
                 nugMean[i],
-                linear = fit["linear"]
+                linear=fit["linear"],
             ).squeeze()
         # TODO: Copy the updated linalg.solve_triangular solution from above
         # to fix FutureWarnings about triangular_solve.
