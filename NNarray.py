@@ -1,5 +1,5 @@
 import warnings
-from numpy import ndarray, any, argsort, arange, delete, greater_equal, int32, int64, nonzero, ones
+from numpy import asarray, ndarray, any, argsort, arange, delete, greater_equal, int32, int64, nonzero, ones
 from scipy.spatial.distance import cdist
 
 import faiss
@@ -7,6 +7,8 @@ import faiss
 
 def NN_L2(locs: ndarray, m: int) -> ndarray:
     n, d = locs.shape
+    if isinstance(locs, ndarray) and locs.dtype == 'float64':
+        asarray(locs, dtype='float32')
     NN = -ones((n, m + 1), dtype=int)
     mult = 2
     maxVal = min(m * mult + 1, n)
