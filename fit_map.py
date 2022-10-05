@@ -293,7 +293,7 @@ def fit_map_mini(
     if len(X_data.shape) == 2:
         X_data = X_data.unsqueeze(2)
     p: int = int(X_data.shape[-1])
-    print("p val = {}".format(p))
+    
     # default initial values
     thetaInit = torch.tensor(
         # TODO:
