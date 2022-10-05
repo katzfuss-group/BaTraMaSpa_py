@@ -289,8 +289,11 @@ def fit_map_mini(
     scalTest=None,
     **kwargs
 ):
-    # Assume X_data.shape = [p, n, N] or [n, N] in the p=1 case
-    p = 1 if len(X_data.shape) == 2 else X_data.shape[0]
+    # Assume X_data.shape = [n, N, p] or [n, N, 1] in the p=1 case
+    if len(X_data.shape) == 2:
+        X_data = X_data.unsqueeze(2)
+    p: int = int(X_data.shape[-1])
+    print("p val = {}".format(p))
     # default initial values
     thetaInit = torch.tensor(
         # TODO:
@@ -307,8 +310,8 @@ def fit_map_mini(
             0.0,  # range param hyper
             -1.0,  # nugget hyper
             # Use Relu function to threshold negative (namely -inf) values:
-            X_data.amax(0).amax(0).sub(X_data.amin(0).amin(0)).div(5).log().relu(),
-            torch.zeros(X_data.shape[-1]),
+            *torch.log(0.2 * (X_data.amax(0).amax(0) - X_data.amin(0).amin(0))).relu(),
+            *torch.zeros(p)
         ]
     )
     if linear:
@@ -475,7 +478,7 @@ def cond_samp(
             y_new[i] = uniNDist.sample()
         elif mode == "trans":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
-            xStand = (obs[i] - meanPred) / initVar.sqrt()
+            xStand = (Y_obs[i] - meanPred) / initVar.sqrt()
             STDist = StudentT(2 * alphaPost[i])
             uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
             y_new[i] = uniNDist.icdf(STDist.cdf(xStand))
