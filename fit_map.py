@@ -101,12 +101,12 @@ def kernel_fun(
         X2s = torch.zeros_like(X2)
     else:
         if linear:
-            X1s = X1.mul(scaling_x(scal, theta, index0, index1))
-            X2s = X2.mul(scaling_x(scal, theta, index0, index1))
-        else:
             X1s = X1.mul(linear_scaling_x(scal, theta, index0, index1))
             X2s = X2.mul(linear_scaling_x(scal, theta, index0, index1))
-
+        else:
+            X1s = X1.mul(scaling_x(scal, theta, index0, index1))
+            X2s = X2.mul(scaling_x(scal, theta, index0, index1))
+            
     # Now concatenate Y and X components for use in the full kernel.
     W1s = torch.cat((Y1s, X1s), 1)
     W2s = torch.cat((Y2s, X2s), 1)
