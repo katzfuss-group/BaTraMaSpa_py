@@ -17,7 +17,8 @@ def scaling_fun(k, theta):
 
 
 def scaling_x(scal, theta, index0, index1):
-    return scal.log().mul(theta[index1]).add(theta[index0]).exp()
+    assert scal.shape == index0.shape == index1.shape
+    return scal.log().mul(theta[index0]).add(theta[index1]).exp()
 
 
 def linear_scaling_x(scal, theta, index0, index1):
@@ -75,7 +76,7 @@ def kernel_fun(
     # ith location is the same for all n and p, and is assumed to be a scalar
     # tensor. The scale is then expanded to have the same shape as X1.
     if not isinstance(scal, torch.Tensor):
-        scal = torch.tensor(scal)
+        scal = torch.tensor(scal).repeat(n, p)
     scal = scal.repeat(n, p)
 
     # Fill in other locations if necessary.
