@@ -361,6 +361,8 @@ def fit_map_mini(
                     Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest
                 )
                 print("Current test score is ", scrPrev, "\n")
+                if scrPrev == float("inf") or scrPrev == float("-inf"):
+                    raise ValueError("The initial score is infinite")
         else:
             with torch.no_grad():
                 scrCurr = transportMap(
