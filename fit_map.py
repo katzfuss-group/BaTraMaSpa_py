@@ -4,6 +4,7 @@ from gpytorch.kernels import MaternKernel
 from torch.distributions import Normal
 from torch.distributions import MultivariateNormal
 from pyro.distributions import InverseGamma
+from scipy.stats import invgamma, norm, t, uniform
 from torch.nn.parameter import Parameter
 from torch.distributions.studentT import StudentT
 
@@ -16,13 +17,12 @@ def scaling_fun(k, theta):
     return torch.sqrt(torch.exp(k.mul(theta[2])))
 
 
-def scaling_x(scal, theta, index0, index1):
-    assert scal.shape == index0.shape == index1.shape
-    return scal.log().mul(theta[index0]).add(theta[index1]).exp()
-
-
-def linear_scaling_x(scal, theta, index0, index1):
-    return scaling_x(scal, theta, index0.sub(3), index1.sub(3))
+def scaling_x(i, theta, scales, index0, index1):
+    try:
+        assert not scales.isnan().all()
+    except:
+        raise AssertionError("scales contains nan values")
+    return scales[i].log().mul(theta[index1]).add(theta[index0]).exp()
 
 
 def sigma_fun(i, theta, scales):
@@ -57,27 +57,10 @@ def m_threshold(theta, mMax):
 # Peak where this is called to understand what the input is.
 # Calls once in TransportMap.forward and twice in cond_sample.
 def kernel_fun(
-    Y1, X1, theta, sigma, smooth, scal, nuggetMean=None, Y2=None, X2=None, linear=False
+    Y1, X1, theta, sigma, smooth, scales, nuggetMean=None, Y2=None, X2=None, linear=False
 ):
     # Y1 assumed n x N
     N = Y1.shape[1]
-
-    # X1 assumed (n x N x p) with subindexing to (n x p) at the ith location
-    # (i = 0, ..., N-1).  Must construct indexing for theta_{x0} and theta_{x1}.
-    # The 6 is hard coded based on an original prior.  In the future this should
-    # all be handled by class attributes rather than hard coding.
-    n = X1.shape[0]
-    p = X1.shape[-1]
-
-    index0 = torch.arange(p).add(6)
-    index1 = torch.arange(p).add(6 + p)
-
-    # Now must force the scale to have the same shape as X1.  The scale at the
-    # ith location is the same for all n and p, and is assumed to be a scalar
-    # tensor. The scale is then expanded to have the same shape as X1.
-    if not isinstance(scal, torch.Tensor):
-        scal = torch.tensor(scal).repeat(n, p)
-    scal = scal.repeat(n, p)
 
     # Fill in other locations if necessary.
     if Y2 is None:
@@ -101,13 +84,9 @@ def kernel_fun(
         X1s = torch.zeros_like(X1)
         X2s = torch.zeros_like(X2)
     else:
-        if linear:
-            X1s = X1.mul(linear_scaling_x(scal, theta, index0, index1))
-            X2s = X2.mul(linear_scaling_x(scal, theta, index0, index1))
-        else:
-            X1s = X1.mul(scaling_x(scal, theta, index0, index1))
-            X2s = X2.mul(scaling_x(scal, theta, index0, index1))
-            
+        X1s = X1.mul(scales)
+        X2s = X2.mul(scales)
+    
     # Now concatenate Y and X components for use in the full kernel.
     W1s = torch.cat((Y1s, X1s), 1)
     W2s = torch.cat((Y2s, X2s), 1)
@@ -137,16 +116,22 @@ class TransportMap(torch.nn.Module):
         self.linear = linear
 
     def forward(self, Y_data, X_data, NNmax, mode, m=None, inds=None, scal=None):
+        n, N, p = X_data.shape
+        assert Y_data.shape == (n, N)
+        
         # theta as intermediate var
         if self.linear:
-            theta = torch.cat((self.theta, torch.tensor([-float("inf"), 0.0, 0.0])))
+            theta = torch.cat((
+                self.theta[:3],
+                torch.tensor([-float("inf"), 0.0, 0.0]),
+                self.theta[6:]
+            ))
         else:
             theta = self.theta
-        # Get dimensions from X_data.  Assume X is (n, N, p) and Y is (n, N).
-        # Validate assumptions by comparing the shapes of X and Y data.
-        n, N, p = X_data.shape
 
-        assert Y_data.shape == (n, N)
+        # Arguments for indexing into theta
+        index0 = torch.arange(p).add(6)
+        index1 = torch.arange(p).add(6 + p)
 
         if m is None:
             m = m_threshold(theta, NNmax.shape[1])
@@ -194,7 +179,7 @@ class TransportMap(torch.nn.Module):
                     theta,
                     sigma_fun(inds[i], theta, scal),
                     self.smooth,
-                    scal[i],
+                    scaling_x(i, theta, scal, index0, index1),
                     nugMean[i],
                     linear=self.linear,
                 )  # n X n
@@ -297,12 +282,6 @@ def fit_map_mini(
     
     # default initial values
     thetaInit = torch.tensor(
-        # TODO:
-        # Revisit this instantiation. How does it work if we use the linear flag?
-        # In the linear case we concatenate theta with [-inf, 0, 0], so the
-        # input theta should be fine.
-        # This should be deparsed into two separate constructors
-        # rather than handled as control flow.
         [
             Y_data[:, 0].square().mean().log(),
             0.2,  # \theta_sigma hypers
@@ -316,14 +295,10 @@ def fit_map_mini(
         ]
     )
     if linear:
-        # Must keep the x parameters when subsetting for a linear fit.
-        # Temporarily store parameters in a list, then replace it
-        _theta_init_size = thetaInit.shape[0]
-        _linear_subset = [0, 1, 2] + list(range(6, _theta_init_size))
-        thetaInit = thetaInit[_linear_subset]
-
-        # Destroy these variables after recreating the linear theta
-        del (_theta_init_size, _linear_subset)
+        thetaInit = torch.cat([
+            thetaInit[:3],
+            thetaInit[6:]
+        ])
 
     transportMap = TransportMap(thetaInit, linear=linear, tuneParm=tuneParm)
     optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr, momentum=0.9)
@@ -361,16 +336,18 @@ def fit_map_mini(
                     Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest
                 )
                 print("Current test score is ", scrPrev, "\n")
+                if scrPrev == float("inf") or scrPrev == float("-inf"):
+                    raise ValueError("The initial score is infinite")
         else:
             with torch.no_grad():
                 scrCurr = transportMap(
                     Y_dataTest, X_dataTest, NNmaxTest, "intlik", scal=scalTest
                 )
                 print("Current test score is ", scrCurr, "\n")
-            if scrCurr > scrPrev:
-                break
                 if scrCurr == float("inf") or scrCurr == float("-inf"):
                     raise ValueError("The current score is infinite")
+            if scrCurr > scrPrev:
+                break
             scrPrev = scrCurr
     with torch.no_grad():
         return transportMap(Y_data, X_data, NNmax, "fit", scal=scal, **kwargs)
@@ -407,9 +384,15 @@ def cond_samp(
     if indLast is None:
         indLast = N
 
+    nparams = theta.size().numel()
+    p = (nparams - 6)//2
+    assert p == X_data.shape[-1]
+    index0 = torch.arange(p).add(6)
+    index1 = torch.arange(p).add(6 + p)
+    
     # loop over variables/locations
     y_new = scr = torch.cat((Y_fix, torch.zeros(N - Y_fix.size(0))))
-    for i in range(Y_fix.size(0), indLast + 1):
+    for i in range(Y_fix.size(0), indLast):
         # predictive distribution for current sample
         if i == 0:
             cStar = torch.zeros(n)
@@ -420,32 +403,31 @@ def cond_samp(
             X = X_data[:, i, :] # [n, p]
             if mode in ["score", "trans", "scorepm"]:
                 Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0) # []
-                X_pred = X_obs[:, i, :]
+                X_pred = X_obs[:, i, :].mean(0)
             else:
                 Y_pred = y_new[NN[i, :ncol]].unsqueeze(0)
-                X_pred = X.mean(dim = 0).unsqueeze(0)
-            # This code is breaking when calling kernel_fun due to a concatenation
-            # error. In troubleshooting, get Y (1 x 15) and X (10 x 1) subsets.
-            # Troubleshooting is over a modified version of example1.py.
+                X_pred = X.mean(0).unsqueeze(0)
+
             cStar = kernel_fun(
                 Y_pred,
                 X_pred,
                 theta,
                 sigma_fun(i, theta, scal),
                 smooth,
-                scal,
+                scaling_x(i, theta, scal, index0, index1),
                 nugMean[i],
                 Y2=Y,
                 X2=X,
                 linear=fit["linear"],
             ).squeeze()
+
             prVar = kernel_fun(
                 Y_pred,
                 X_pred,
                 theta,
                 sigma_fun(i, theta, scal),
                 smooth,
-                scal,
+                scaling_x(i, theta, scal, index0, index1),
                 nugMean[i],
                 linear=fit["linear"],
             ).squeeze()
@@ -456,6 +438,7 @@ def cond_samp(
         ].squeeze()
         meanPred = yTilde[i, :].mul(cChol).sum()
         varPredNoNug = prVar - cChol.square().sum()
+
         # evaluate score or sample
         if mode == "score":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
@@ -495,6 +478,106 @@ def cond_samp(
     else:
         return y_new
 
+def covar_samples(
+    fit,
+    mode,
+    Y_obs=None,
+    X_obs=None,
+    Y_fix=torch.tensor([]),
+    indLast=None,
+):
+    Y_data = fit["Y_data"]
+    X_data = fit["X_data"]
+    NN = fit["NN"]
+    theta = fit["theta"]
+    scal = fit["scal"]
+    nugMult = fit["tuneParm"][0]
+    smooth = fit["tuneParm"][1]
+    nugMean = fit["nugMean"]
+    chol = fit["Chol"]
+    yTilde = fit["yTilde"]
+    betaPost = fit["betaPost"]
+    alphaPost = fit["alphaPost"]
+
+    n, N, p = X_data.shape
+    assert Y_data.shape == (n, N)
+
+    m = NN.shape[1]
+    if indLast is None:
+        indLast = N
+
+    nparams = theta.size().numel()
+    p = (nparams - 6)//2
+    assert p == X_data.shape[-1]
+    index0 = torch.arange(p).add(6)
+    index1 = torch.arange(p).add(6 + p)
+    
+    # loop over variables/locations
+    y_new = scr = torch.cat((Y_fix, torch.zeros(N - Y_fix.size(0))))
+
+    for i in range(Y_fix.size(0), indLast):
+        # predictive distribution for current sample
+        if Y_obs is None:
+            Y_obs = y_new
+        if i == 0:
+            cStar = torch.zeros(n)
+            prVar = torch.tensor(0.0)
+        else:
+            ncol = min(i, m)
+            Y = Y_data[:, NN[i, :ncol]] # [n, ncol]
+            X = X_data[:, i, :] # [n, p]
+            if mode in ["score", "trans", "scorepm"]:
+                Y_pred = Y_obs[NN[i, :ncol]].unsqueeze(0) # []
+                X_pred = X_obs.unsqueeze(0)[:, i, :]
+            else:
+                Y_pred = y_new[NN[i, :ncol]].unsqueeze(0)
+                X_pred = X.mean(0).unsqueeze(0)
+            
+            cStar = kernel_fun(
+                Y_pred,
+                X_pred,
+                theta,
+                sigma_fun(i, theta, scal),
+                smooth,
+                scaling_x(i, theta, scal, index0, index1),
+                nugMean[i],
+                Y2=Y,
+                X2=X,
+                linear=fit["linear"],
+            ).squeeze()
+
+            prVar = kernel_fun(
+                Y_pred,
+                X_pred,
+                theta,
+                sigma_fun(i, theta, scal),
+                smooth,
+                scaling_x(i, theta, scal, index0, index1),
+                nugMean[i],
+                linear=fit["linear"],
+            ).squeeze()
+        # TODO: Copy the updated linalg.solve_triangular solution from above
+        # to fix FutureWarnings about triangular_solve.
+        cChol = torch.triangular_solve(cStar.unsqueeze(1), chol[i, :, :], upper=False)[
+            0
+        ].squeeze()
+        meanPred = yTilde[i, :].mul(cChol).sum()
+        varPredNoNug = prVar - cChol.square().sum()
+        # evaluate score or sample
+        if mode == "fx":
+            y_new[i] = meanPred
+        elif mode == "trans":
+            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
+            xStand = (Y_obs[i] - meanPred) / initVar.sqrt()
+            STDist = t(2 * alphaPost[i])
+            uniNDist = norm(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
+            y_new[i] = uniNDist.cdf(STDist.cdf(xStand))
+        elif mode == "invtrans":
+            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
+            z_cdf = norm(0, 1).cdf(Y_obs[i])
+            inv_t = t(2 * alphaPost[i]).ppf(z_cdf)
+            y_new[i] = meanPred + inv_t * initVar.sqrt()
+    return y_new
 
 # locsOdr: each row is one location
 # NN: each row represents one location
