@@ -571,7 +571,7 @@ def covar_samples(
             xStand = (Y_obs[i] - meanPred) / initVar.sqrt()
             STDist = t(2 * alphaPost[i])
             uniNDist = norm(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            y_new[i] = uniNDist.cdf(STDist.cdf(xStand))
+            y_new[i] = uniNDist.ppf(STDist.cdf(xStand))
         elif mode == "invtrans":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             z_cdf = norm(0, 1).cdf(Y_obs[i])

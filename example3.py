@@ -72,8 +72,6 @@ def fit_map(x = (0.5, 0.2, 0.8), nsamples = 100, seed = 1, n = 20, d = 2, *args,
         torch.ones(nsamples, n**2).mul(_) for _ in x
     ], dim = 0).log().unsqueeze(-1)
 
-    X = torch.zeros(nsamples * len(x), n**2, 1)
-
     m = 30
     locs = make_uniform_grid(n=n, d=d)
     order = maxmin_approx(locs)
@@ -162,17 +160,17 @@ def main(sample_index, figname, tm, initial_params, exp_data):
 
 if __name__ == "__main__":
 
-    # tm, initial_params, exp_data = fit_map()
+    tm, initial_params, exp_data = fit_map()
 
-    # sample_indices = (50, 150, 250)
-    # fignames = ('log05.png', 'log02.png', 'log08.png')
+    sample_indices = (50, 150, 250)
+    fignames = ('log05.png', 'log02.png', 'log08.png')
 
-    # for sample_index, figname in zip(sample_indices, fignames):
-    #     main(sample_index, figname, tm, initial_params, exp_data)
-
-    xvals = (0.5, 0.2, 0.8)
-    fignames = ('nox_log05.png', 'nox_log02.png', 'nox_log08.png')
-    for xval, figname in zip(xvals, fignames):
-        tm, initial_params, exp_data = fit_map(x = xval)
-        sample_index = 50
+    for sample_index, figname in zip(sample_indices, fignames):
         main(sample_index, figname, tm, initial_params, exp_data)
+
+    # xvals = (0.5, 0.2, 0.8)
+    # fignames = ('nox_log05.png', 'nox_log02.png', 'nox_log08.png')
+    # for xval, figname in zip(xvals, fignames):
+    #     tm, initial_params, exp_data = fit_map(x = xval)
+    #     sample_index = 50
+    #     main(sample_index, figname, tm, initial_params, exp_data)
