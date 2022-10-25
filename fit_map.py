@@ -7,6 +7,8 @@ from pyro.distributions import InverseGamma
 from torch.nn.parameter import Parameter
 from torch.distributions.studentT import StudentT
 
+from scipy.stats import norm, t
+
 
 def nug_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[1]).add(theta[0]))
@@ -225,7 +227,7 @@ def cond_samp(fit, mode, obs=None, xFix=torch.tensor([]), indLast=None):
         indLast = N
     # loop over variables/locations
     xNew = scr = torch.cat((xFix, torch.zeros(N - xFix.size(0))))
-    for i in range(xFix.size(0), indLast + 1):
+    for i in range(xFix.size(0), indLast):
         # predictive distribution for current sample
         if i == 0:
             cStar = torch.zeros(n)
@@ -273,14 +275,10 @@ def cond_samp(fit, mode, obs=None, xFix=torch.tensor([]), indLast=None):
         elif mode == 'trans':
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             xStand = (obs[i] - meanPred) / initVar.sqrt()
-            STDist = StudentT(2 * alphaPost[i])
-            uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            xNew[i] = uniNDist.icdf(STDist.cdf(xStand))
+            xNew[i] = norm(0, 1).ppf(t(2 * alphaPost[i]).cdf(xStand))
         elif mode == 'invtrans':
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
-            STDist = StudentT(2 * alphaPost[i])
-            uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            xNew[i] = meanPred + STDist.icdf(uniNDist.cdf(obs[i])) * \
+            xNew[i] = meanPred + t(2 * alphaPost[i]).ppf(norm(0, 1).cdf(obs[i])) * \
                       initVar.sqrt()
     if mode in ['score', 'scorepm']:
         return scr.sum()
