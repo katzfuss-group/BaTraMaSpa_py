@@ -63,10 +63,9 @@ def kernel_fun(
     N = Y1.shape[1]
 
     # Fill in other locations if necessary.
-    if Y2 is None:
-        Y2 = Y1
-    if X2 is None:
-        X2 = X1
+    Y2 = Y1 if Y2 is None else Y2
+    X2 = X1 if X2 is None else X2
+    
     if nuggetMean is None:
         nuggetMean = 1
 

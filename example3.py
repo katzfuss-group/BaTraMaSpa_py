@@ -12,6 +12,7 @@ from fit_map import fit_map_mini, compute_scal, cond_samp, covar_samples
 
 
 FIGPATH = '../figures/covariate_experiments/'
+DATAPATH = '../data/simulations/covariate_experiments/'
 
 
 def make_uniform_grid(n=40, d=2):
@@ -72,6 +73,9 @@ def fit_map(x = (0.5, 0.2, 0.8), nsamples = 100, seed = 1, n = 20, d = 2, *args,
         torch.ones(nsamples, n**2).mul(_) for _ in x
     ], dim = 0).log().unsqueeze(-1)
 
+    ## If marginal x
+    # X = torch.zeros(nsamples, n**2, 1)
+
     m = 30
     locs = make_uniform_grid(n=n, d=d)
     order = maxmin_approx(locs)
@@ -87,6 +91,7 @@ def fit_map(x = (0.5, 0.2, 0.8), nsamples = 100, seed = 1, n = 20, d = 2, *args,
     tm = fit_map_mini(y, X, nn, scal = scale, linear = False, lr = 8e-7, maxEpoch=25)
 
     return tm, initial_params, exp_data
+
 
 def main(sample_index, figname, tm, initial_params, exp_data):
     """Plots results from experiments run in fit_map function."""
@@ -161,13 +166,49 @@ def main(sample_index, figname, tm, initial_params, exp_data):
 if __name__ == "__main__":
 
     tm, initial_params, exp_data = fit_map()
+    n = initial_params['n']
+    torch.manual_seed(1)
 
-    sample_indices = (50, 150, 250)
-    fignames = ('log05.png', 'log02.png', 'log08.png')
+    with torch.no_grad():
+        Y = tm['Y_data']
+        X = tm['X_data']
+        Z = torch.zeros(Y.shape)
+        for t in range(Y.shape[0]):
+            Z[t] = covar_samples(tm, 'trans', Y_obs = Y[t], X_obs = X[t])
 
-    for sample_index, figname in zip(sample_indices, fignames):
-        main(sample_index, figname, tm, initial_params, exp_data)
+        torch.save(Z, DATAPATH + 'fwd_transform.pt')
 
+    with torch.no_grad():
+        newx = (0.21, 0.3, 0.4, 0.49, 0.51, 0.6, 0.7, 0.79)
+
+        for x in newx:
+            X = torch.ones(n**2, 1).mul(x).log()
+            Y = torch.empty(25, n**2)
+            for j in range(25):
+                z = torch.randn(n**2)
+                Y[j] = covar_samples(tm, 'invtrans', z, X)
+
+            datum = 0
+            fig, ax = plt.subplots(5, 5)
+            fig.suptitle('Map samples from X = log({:.2f})'.format(x))
+            for row in range(5):
+                for col in range(5):
+                    ax[row, col].imshow(Y[datum].reshape(n, n), cmap = 'Spectral_r')
+                    ax[row, col].set_xticks([])
+                    ax[row, col].set_yticks([])
+                    datum += 1
+            plt.savefig(FIGPATH + f"new_sample_{x}.png", dpi = 600)
+            plt.close()
+
+    ## Uncomment to reproduce simulations reproducing the original GPs
+    # sample_indices = (50, 150, 250)
+    # fignames = ('log05.png', 'log02.png', 'log08.png')
+
+    # for sample_index, figname in zip(sample_indices, fignames):
+    #     main(sample_index, figname, tm, initial_params, exp_data)
+
+    ## Uncomment to reproduce simulations reproducing the original GPs marginally
+    ## Uncomment the X modification in main() if fitting marginally
     # xvals = (0.5, 0.2, 0.8)
     # fignames = ('nox_log05.png', 'nox_log02.png', 'nox_log08.png')
     # for xval, figname in zip(xvals, fignames):
