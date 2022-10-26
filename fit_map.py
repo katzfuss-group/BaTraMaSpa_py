@@ -8,6 +8,8 @@ from scipy.stats import invgamma, norm, t, uniform
 from torch.nn.parameter import Parameter
 from torch.distributions.studentT import StudentT
 
+from scipy.stats import norm, t
+
 # region: help-functions
 def nug_fun(i, theta, scales):
     return torch.exp(torch.log(scales[i]).mul(theta[1]).add(theta[0]))
@@ -464,14 +466,14 @@ def cond_samp(
         elif mode == "trans":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             xStand = (Y_obs[i] - meanPred) / initVar.sqrt()
-            STDist = StudentT(2 * alphaPost[i])
-            uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            y_new[i] = uniNDist.icdf(STDist.cdf(xStand))
+            STDist = t(2 * alphaPost[i])
+            uniNDist = norm(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
+            y_new[i] = uniNDist.ppf(STDist.cdf(xStand))
         elif mode == "invtrans":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
-            STDist = StudentT(2 * alphaPost[i])
-            uniNDist = Normal(loc=torch.tensor(0.0), scale=torch.tensor(1.0))
-            y_new[i] = meanPred + STDist.icdf(uniNDist.cdf(Y_obs[i])) * initVar.sqrt()
+            z_cdf = norm(0, 1).cdf(Y_obs[i])
+            inv_t = t(2 * alphaPost[i]).ppf(z_cdf)
+            y_new[i] = meanPred + inv_t * initVar.sqrt()
     if mode in ["score", "scorepm"]:
         return scr.sum()
     else:
