@@ -2,6 +2,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+from torch.distributions import Normal
 
 from fit_map import compute_scal, cond_samp, fit_map_mini, TransportMap
 from maxmin_approx import maxmin_approx
@@ -11,9 +12,59 @@ from NNarray import NN_L2
 # gp data and locs generated using example3.construct_gp
 # and example3.make_uniform_grid. Files saved via torch.save.
 FIGPATH = '../figures/covariate_experiments/'
-FILEPATH = '../data/simulations/gp_covars/'
+FILEPATH = '../data/simulations/covariate_experiments/'
 GP_DATA = 'gp_050208.npy'
 LOCS = 'locs.npy'
+
+XVALS = (0.5, 0.2, 0.8)
+
+def make_uniform_grid(n=40, d=2):
+    """Construct a uniform grid of n points in [0, 1]^d."""
+    x = np.linspace(0, 1, n)
+    grid = np.meshgrid(*[x for _ in range(d)])
+    return np.c_[[grid[_].flatten() for _ in range(d)]].T.astype('float32')
+
+
+def make_kernel(x: float, *args, **kwargs) -> np.ndarray:
+    """Construct a kernel matrix for a uniform grid of n points in [0, 1]^d."""
+    from scipy.spatial.distance import cdist
+    locs = make_uniform_grid(*args, **kwargs)
+    dist = cdist(locs, locs)
+    p = dist.shape[0] // 2
+    kernel = np.exp(-dist / x)
+
+    return kernel
+
+
+def sample_gp(samples, *args, **kwargs):
+    kernel = torch.from_numpy(make_kernel(*args, **kwargs))
+    samples = torch.tensor((samples, kernel.shape[0]))
+    z = Normal(0.0, 1.0).sample(samples)
+    C = torch.linalg.cholesky(kernel).float()
+    y = C.matmul(z.T)
+    return y.T
+
+
+def construct_gp(
+    samples: int = 100, x: tuple = (0.5, 0.2, 0.8), seed: int = 1, *args, **kwargs
+) -> torch.Tensor:
+    torch.manual_seed(seed)
+
+    # want two iterables with equal samples for each x
+    if isinstance(x, float):
+        x = (x,)
+    samples = [samples for _ in range(len(x))]
+
+    assert len(samples) == len(x)
+    n = kwargs["n"] if "n" in kwargs.keys() else 40
+
+    y = torch.empty((len(samples), samples[0], n**2))
+
+    for k in range(len(samples)):
+        y[k] = sample_gp(samples[k], x=x[k], *args, **kwargs)
+
+    return y.reshape(-1, n**2)
+
 
 def plot_experiment(sample_index, figname, tm, lengthscale):
     """
@@ -21,9 +72,6 @@ def plot_experiment(sample_index, figname, tm, lengthscale):
     using a marginal transport map only.
     """
 
-    Y: torch.tensor = tm['Y_data']
-    n = Y.size(1)
-    
     scale: torch.tensor = tm['scal']
 
     with torch.no_grad():
@@ -36,21 +84,26 @@ def plot_experiment(sample_index, figname, tm, lengthscale):
         inv_min = inv_max = 0
 
         for i in range(6):
-            z = torch.randn(n**2)
             fx_sample = cond_samp(tm, 'fx')
             fx_min = min(fx_min, fx_sample.min())
             fx_max = max(fx_max, fx_sample.max())
             fx_samples.append(fx_sample)
 
-            fwd_sample = cond_samp(tm, 'trans', Y_obs = Y[sample_index+i])
+            fwd_sample = cond_samp(tm, 'trans', obs = Y[sample_index + i])
             fwd_min = min(fwd_min, fwd_sample.min())
             fwd_max = max(fwd_max, fwd_sample.max())
             fwd_samples.append(fwd_sample)
             
-            inv_sample = cond_samp(tm, 'invtrans', Y_obs = fwd_sample)
+            inv_sample = cond_samp(tm, 'invtrans', obs = fwd_sample)
             inv_min = min(inv_min, inv_sample.min())
             inv_max = max(inv_max, inv_sample.max())
             inv_samples.append(inv_sample)
+
+        Z = torch.empty(Y.shape)
+        for _ in range(Z.shape[0]):
+            Z[_] = cond_samp(tm, 'trans', obs = Y[_])
+        
+    torch.save(Z, os.path.join(FILEPATH, f'margZ_{lengthscale}.pt'))
 
     fig, ax = plt.subplots(4, 6, figsize=(15, 6), constrained_layout = True)
 
@@ -95,15 +148,16 @@ NN = NN_L2(locs[order], m)[:, 1:]
 
 locs = torch.from_numpy(locs[order])
 NN = torch.from_numpy(NN)
-y = torch.load(FILEPATH + GP_DATA)
+n = 20
+Y = construct_gp(samples = 100, n = n)
 
 scale = compute_scal(locs, NN)
 
-fit_05 = fit_map_mini(y[:100], NN, linear=False, scal=scale, lr=1e-4)
-plot_experiment(50, FIGPATH + 'marg_05.png', fit_05, 0.5)
+fit_05 = fit_map_mini(Y[:100], NN, linear=False, scal=scale, lr=1e-5)
+plot_experiment(50, 'marg_05.png', fit_05, 0.5)
 
-fit_02 = fit_map_mini(y[100:200], NN, linear=False, scal=scale, lr=1e-4)
-plot_experiment(150, FIGPATH + 'marg_02.png', fit_02, 0.2)
+fit_02 = fit_map_mini(Y[100:200], NN, linear=False, scal=scale, lr=1e-5)
+plot_experiment(50, 'marg_02.png', fit_02, 0.2)
 
-fit_08 = fit_map_mini(y[200:], NN, linear=False, scal=scale, lr=1e-4)
-plot_experiment(250, FIGPATH + 'marg_08.png', fit_08, 0.8)
+fit_08 = fit_map_mini(Y[200:], NN, linear=False, scal=scale, lr=1e-5)
+plot_experiment(50, 'marg_08.png', fit_08, 0.8)
