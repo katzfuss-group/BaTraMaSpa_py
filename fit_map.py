@@ -567,6 +567,11 @@ def covar_samples(
         # evaluate score or sample
         if mode == "fx":
             y_new[i] = meanPred
+        elif mode == "bayes":
+            invGDist = InverseGamma(concentration=alphaPost[i], rate=betaPost[i])
+            nugget = invGDist.sample()
+            uniNDist = Normal(loc=meanPred, scale=nugget.mul(1 + varPredNoNug).sqrt())
+            y_new[i] = uniNDist.sample()
         elif mode == "trans":
             initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
             xStand = (Y_obs[i] - meanPred) / initVar.sqrt()
