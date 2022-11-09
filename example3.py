@@ -201,7 +201,7 @@ if __name__ == "__main__":
 
     # Uncomment to reproduce simulations reproducing the original GPs
     sample_indices = (50, 150, 250)
-    fignames = ('log05.png', 'log02.png', 'log08.png')
+    fignames = ('log02.png', 'log05.png', 'log08.png')
 
     for sample_index, figname in zip(sample_indices, fignames):
         main(sample_index, figname, tm, initial_params, exp_data)
@@ -209,7 +209,7 @@ if __name__ == "__main__":
     # Uncomment to reproduce simulations reproducing the original GPs marginally
     # Uncomment the X modification in main() if fitting marginally
     xvals = (0.2, 0.5, 0.8)
-    fignames = ('nox_log05.png', 'nox_log02.png', 'nox_log08.png')
+    fignames = ('nox_log02.png', 'nox_log05.png', 'nox_log08.png')
     for xval, figname in zip(xvals, fignames):
         tm, initial_params, exp_data = fit_map(x = xval)
         sample_index = 50
