@@ -62,7 +62,7 @@ def construct_gp(
     return y.reshape(-1, n**2)
 
 
-def fit_map(x = (0.5, 0.2, 0.8), nsamples = 100, seed = 1, n = 20, d = 2, *args, **kwargs) -> Tuple[dict, dict, dict]:
+def fit_map(x = (0.2, 0.5, 0.8), nsamples = 100, seed = 1, n = 20, d = 2, *args, **kwargs) -> Tuple[dict, dict, dict]:
     initial_params = {'nsamples': nsamples, 'x': x, 'seed': seed, 'n': n, 'd': d}
 
     if isinstance(x, float):
@@ -179,14 +179,13 @@ if __name__ == "__main__":
         torch.save(Z, DATAPATH + 'fwd_transform.pt')
 
     with torch.no_grad():
-        newx = (0.21, 0.3, 0.4, 0.49, 0.51, 0.6, 0.7, 0.79)
+        newx = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
 
         for x in newx:
             X = torch.ones(n**2, 1).mul(x).log()
             Y = torch.empty(25, n**2)
             for j in range(25):
-                z = torch.randn(n**2)
-                Y[j] = covar_samples(tm, 'invtrans', z, X)
+                Y[j] = covar_samples(tm, 'bayes', X_obs = X)
 
             datum = 0
             fig, ax = plt.subplots(5, 5)
@@ -197,21 +196,21 @@ if __name__ == "__main__":
                     ax[row, col].set_xticks([])
                     ax[row, col].set_yticks([])
                     datum += 1
-            plt.savefig(FIGPATH + f"new_sample_{x}.png", dpi = 600)
+            plt.savefig(FIGPATH + f"10312022_generate_{x}.png", dpi = 600)
             plt.close()
 
-    ## Uncomment to reproduce simulations reproducing the original GPs
-    # sample_indices = (50, 150, 250)
-    # fignames = ('log05.png', 'log02.png', 'log08.png')
+    # Uncomment to reproduce simulations reproducing the original GPs
+    sample_indices = (50, 150, 250)
+    fignames = ('log05.png', 'log02.png', 'log08.png')
 
-    # for sample_index, figname in zip(sample_indices, fignames):
-    #     main(sample_index, figname, tm, initial_params, exp_data)
+    for sample_index, figname in zip(sample_indices, fignames):
+        main(sample_index, figname, tm, initial_params, exp_data)
 
-    ## Uncomment to reproduce simulations reproducing the original GPs marginally
-    ## Uncomment the X modification in main() if fitting marginally
-    # xvals = (0.5, 0.2, 0.8)
-    # fignames = ('nox_log05.png', 'nox_log02.png', 'nox_log08.png')
-    # for xval, figname in zip(xvals, fignames):
-    #     tm, initial_params, exp_data = fit_map(x = xval)
-    #     sample_index = 50
-    #     main(sample_index, figname, tm, initial_params, exp_data)
+    # Uncomment to reproduce simulations reproducing the original GPs marginally
+    # Uncomment the X modification in main() if fitting marginally
+    xvals = (0.2, 0.5, 0.8)
+    fignames = ('nox_log05.png', 'nox_log02.png', 'nox_log08.png')
+    for xval, figname in zip(xvals, fignames):
+        tm, initial_params, exp_data = fit_map(x = xval)
+        sample_index = 50
+        main(sample_index, figname, tm, initial_params, exp_data)
