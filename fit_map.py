@@ -508,7 +508,7 @@ def covar_samples(
         indLast = N
 
     nparams = theta.size().numel()
-    p = (nparams - 6)//2
+    p = (nparams - 6) // 2
     assert p == X_data.shape[-1]
     index0 = torch.arange(p).add(6)
     index1 = torch.arange(p).add(6 + p)
@@ -564,7 +564,19 @@ def covar_samples(
         ].squeeze()
         meanPred = yTilde[i, :].mul(cChol).sum()
         varPredNoNug = prVar - cChol.square().sum()
+
         # evaluate score or sample
+        if mode == "score":
+            initVar = betaPost[i] / alphaPost[i] * (1 + varPredNoNug)
+            STDist = StudentT(2 * alphaPost[i])
+            scr[i] = (
+                STDist.log_prob((Y_obs[i] - meanPred) / initVar.sqrt())
+                - 0.5 * initVar.log()
+            )
+        elif mode == "scorepm":
+            nugget = betaPost[i] / alphaPost[i].sub(1)
+            uniNDist = Normal(loc=meanPred, scale=nugget.sqrt())
+            scr[i] = uniNDist.log_prob(Y_obs[i])
         if mode == "fx":
             y_new[i] = meanPred
         elif mode == "bayes":
