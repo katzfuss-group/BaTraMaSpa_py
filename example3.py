@@ -11,7 +11,7 @@ from NNarray import NN_L2
 from fit_map import fit_map_mini, compute_scal, cond_samp, covar_samples
 
 
-FIGPATH = '../figures/covariate_experiments/'
+FIGPATH = '../figures/covariate_experiments/nov_update/'
 DATAPATH = '../data/simulations/covariate_experiments/'
 
 
@@ -73,8 +73,7 @@ def fit_map(x = (0.2, 0.5, 0.8), nsamples = 100, seed = 1, n = 20, d = 2, *args,
         torch.ones(nsamples, n**2).mul(_) for _ in x
     ], dim = 0).log().unsqueeze(-1)
 
-    ## If marginal x
-    # X = torch.zeros(nsamples, n**2, 1)
+    # X = torch.zeros(nsamples * len(x), n**2, 1)
 
     m = 30
     locs = make_uniform_grid(n=n, d=d)
@@ -85,13 +84,13 @@ def fit_map(x = (0.2, 0.5, 0.8), nsamples = 100, seed = 1, n = 20, d = 2, *args,
     locs = torch.from_numpy(locs)
     nn = torch.from_numpy(nn)[:, 1:]
     scale = compute_scal(locs, nn)
+    y = y[..., order]
 
     exp_data = {'locs': locs, 'nn': nn, 'scale': scale, 'order': order}
 
-    tm = fit_map_mini(y, X, nn, scal = scale, linear = False, lr = 8e-7, maxEpoch=25)
+    tm = fit_map_mini(y, X, nn, scal = scale, linear = False, lr = 1e-5, maxEpoch=50)
 
     return tm, initial_params, exp_data
-
 
 def main(sample_index, figname, tm, initial_params, exp_data):
     """Plots results from experiments run in fit_map function."""
@@ -99,24 +98,18 @@ def main(sample_index, figname, tm, initial_params, exp_data):
     n: int = initial_params['n']
     X: torch.tensor = tm['X_data']
     Y: torch.tensor = tm['Y_data']
-    scale: torch.tensor = tm['scal']
+
+    rorder = np.argsort(exp_data['order'])
+    Y = Y[..., rorder]
 
     with torch.no_grad():
-        fx_samples = []
         fwd_samples = []
         inv_samples = []
 
-        fx_min  = fx_max  = 0
         fwd_min = fwd_max = 0
         inv_min = inv_max = 0
 
         for i in range(6):
-            z = torch.randn(n**2)
-            fx_sample = covar_samples(tm, 'fx', X_obs = X[sample_index+i])
-            fx_min = min(fx_min, fx_sample.min())
-            fx_max = max(fx_max, fx_sample.max())
-            fx_samples.append(fx_sample)
-
             fwd_sample = covar_samples(tm, 'trans', Y_obs = Y[sample_index+i], X_obs = X[sample_index+i])
             fwd_min = min(fwd_min, fwd_sample.min())
             fwd_max = max(fwd_max, fwd_sample.max())
@@ -127,36 +120,31 @@ def main(sample_index, figname, tm, initial_params, exp_data):
             inv_max = max(inv_max, inv_sample.max())
             inv_samples.append(inv_sample)
 
-    fig, ax = plt.subplots(4, 6, figsize=(15, 6), constrained_layout = True)
+    fig, ax = plt.subplots(3, 6, figsize=(15, 6), constrained_layout = True)
 
     ymin = Y[sample_index:sample_index+6].min()
     ymax = Y[sample_index:sample_index+6].max()
 
-    for i, (fx, fwd, inv) in enumerate(zip(fx_samples, fwd_samples, inv_samples)):
+    for i, (fwd, inv) in enumerate(zip(fwd_samples, inv_samples)):
         im0 = ax[0, i].imshow(Y[sample_index+i].reshape(n, n), cmap = 'Spectral_r', vmin = ymin, vmax = ymax)
         ax[0, i].set_xticks([])
         ax[0, i].set_yticks([])
         plt.colorbar(im0, ax=ax[0, i])
 
-        im1 = ax[1, i].imshow(fx.reshape(n, n), cmap = 'Spectral_r', vmin = fx_min, vmax = fx_max)
+        
+        im1 = ax[1, i].imshow(fwd.reshape(n, n), cmap = 'Spectral_r', vmin = fwd_min, vmax = fwd_max)
         ax[1, i].set_xticks([])
         ax[1, i].set_yticks([])
         plt.colorbar(im1, ax=ax[1, i])
         
-        im2 = ax[2, i].imshow(fwd.reshape(n, n), cmap = 'Spectral_r', vmin = fwd_min, vmax = fwd_max)
+        im2 = ax[2, i].imshow(inv.reshape(n, n), cmap = 'Spectral_r', vmin = inv_min, vmax = inv_max)
         ax[2, i].set_xticks([])
         ax[2, i].set_yticks([])
         plt.colorbar(im2, ax=ax[2, i])
-        
-        im3 = ax[3, i].imshow(inv.reshape(n, n), cmap = 'Spectral_r', vmin = inv_min, vmax = inv_max)
-        ax[3, i].set_xticks([])
-        ax[3, i].set_yticks([])
-        plt.colorbar(im3, ax=ax[3, i])
 
     ax[0, 0].set_ylabel('GP')
-    ax[1, 0].set_ylabel('Fixed Mean')
-    ax[2, 0].set_ylabel('Fwd Transform')
-    ax[3, 0].set_ylabel('Inv Transform')
+    ax[1, 0].set_ylabel('Fwd Transform')
+    ax[2, 0].set_ylabel('Inv Transform')
 
     fig.suptitle(f"Test data for X = log({X[sample_index].mean().exp():.2f})")
     plt.savefig(FIGPATH + figname, dpi = 600)
@@ -172,9 +160,11 @@ if __name__ == "__main__":
     with torch.no_grad():
         Y = tm['Y_data']
         X = tm['X_data']
+        rorder = exp_data['order'].argsort()
+
         Z = torch.zeros(Y.shape)
         for t in range(Y.shape[0]):
-            Z[t] = covar_samples(tm, 'trans', Y_obs = Y[t], X_obs = X[t])
+            Z[t] = covar_samples(tm, 'trans', Y_obs = Y[t], X_obs = X[t])[rorder]
 
         torch.save(Z, DATAPATH + 'fwd_transform.pt')
 
@@ -182,10 +172,10 @@ if __name__ == "__main__":
         newx = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)
 
         for x in newx:
-            X = torch.ones(n**2, 1).mul(x).log()
+            X = torch.ones(n**2, 1).mul(x).log()[exp_data['order']]
             Y = torch.empty(25, n**2)
             for j in range(25):
-                Y[j] = covar_samples(tm, 'bayes', X_obs = X)
+                Y[j] = covar_samples(tm, 'bayes', X_obs = X)[rorder]
 
             datum = 0
             fig, ax = plt.subplots(5, 5)
@@ -196,7 +186,7 @@ if __name__ == "__main__":
                     ax[row, col].set_xticks([])
                     ax[row, col].set_yticks([])
                     datum += 1
-            plt.savefig(FIGPATH + f"10312022_generate_{x}.png", dpi = 600)
+            plt.savefig(FIGPATH + f"11182022_generate_{x}.png", dpi = 600)
             plt.close()
 
     # Uncomment to reproduce simulations reproducing the original GPs
@@ -206,11 +196,9 @@ if __name__ == "__main__":
     for sample_index, figname in zip(sample_indices, fignames):
         main(sample_index, figname, tm, initial_params, exp_data)
 
-    # Uncomment to reproduce simulations reproducing the original GPs marginally
-    # Uncomment the X modification in main() if fitting marginally
-    xvals = (0.2, 0.5, 0.8)
-    fignames = ('nox_log02.png', 'nox_log05.png', 'nox_log08.png')
-    for xval, figname in zip(xvals, fignames):
-        tm, initial_params, exp_data = fit_map(x = xval)
-        sample_index = 50
-        main(sample_index, figname, tm, initial_params, exp_data)
+    # xvals = (0.2, 0.5, 0.8)
+    # fignames = ('nox_log02.png', 'nox_log05.png', 'nox_log08.png')
+    # for xval, figname in zip(xvals, fignames):
+    #     tm, initial_params, exp_data = fit_map(x = xval)
+    #     sample_index = 50
+    #     main(sample_index, figname, tm, initial_params, exp_data)
