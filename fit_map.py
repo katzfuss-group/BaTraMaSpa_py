@@ -162,15 +162,18 @@ class TransportMap(torch.nn.Module):
 
 def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
                  tuneParm=None, lr=1e-5, dataTest=None, NNmaxTest=None,
-                 scalTest=None, **kwargs):
+                 scalTest=None, track_loss = False, **kwargs):
     # default initial values
     thetaInit = torch.tensor([data[:, 0].square().mean().log(),
                               .2, -1.0, .0, .0, -1.0])
     if linear:
         thetaInit = thetaInit[0:3]
+
+    print(f"inital theta: {thetaInit}")
     transportMap = TransportMap(thetaInit, linear=linear,
                                 tuneParm=tuneParm)
-    optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr, momentum=0.9)
+    # optimizer = torch.optim.SGD(transportMap.parameters(), lr=lr, momentum=0.9)
+    optimizer = torch.optim.Adam(transportMap.parameters(), lr=lr)
     if dataTest is None:
         dataTest = data[:, :min(data.shape[1], 5000)]
         NNmaxTest = NNmax[:min(data.shape[1], 5000), :]
@@ -178,8 +181,9 @@ def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
             scalTest = scal[:min(data.shape[1], 5000)]
     # optimizer = torch.optim.Adam(transportMap.parameters(), lr=lr)
     epochIter = int(data.shape[1] / batsz)
+    losses = []
     for i in range(maxEpoch):
-        for j in range(epochIter):
+        for _ in range(epochIter):
             inds = torch.multinomial(torch.ones(data.shape[1]), batsz)
             optimizer.zero_grad()
             try:
@@ -193,7 +197,7 @@ def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
             optimizer.step()
         print("Epoch ", i + 1, "\n")
         for name, parm in transportMap.named_parameters():
-            print(name, ": ", parm.data)
+            print(f"{name}: {parm.data}")
         if i == 0:
             with torch.no_grad():
                 scrPrev = transportMap(dataTest, NNmaxTest, 'intlik', scal=scalTest)
@@ -203,10 +207,15 @@ def fit_map_mini(data, NNmax, scal=None, linear=False, maxEpoch=10, batsz=128,
                 scrCurr = transportMap(dataTest, NNmaxTest, 'intlik', scal=scalTest)
                 print("Current test score is ", scrCurr, "\n")
             if scrCurr > scrPrev:
+                losses.append(scrCurr)
                 break
             scrPrev = scrCurr
+        losses.append(scrPrev)
     with torch.no_grad():
-        return transportMap(data, NNmax, 'fit', scal=scal, **kwargs)
+        tmval = transportMap(data, NNmax, 'fit', scal=scal, **kwargs)
+        if track_loss:
+            return tmval, losses
+        return tmval
 
 
 def cond_samp(fit, mode, obs=None, xFix=torch.tensor([]), indLast=None):
