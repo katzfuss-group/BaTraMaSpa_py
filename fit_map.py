@@ -290,7 +290,7 @@ def cond_samp(fit, mode, obs=None, xFix=torch.tensor([]), indLast=None):
             xNew[i] = meanPred + t(2 * alphaPost[i]).ppf(norm(0, 1).cdf(obs[i])) * \
                       initVar.sqrt()
     if mode in ['score', 'scorepm']:
-        return scr.sum()
+        return scr[xFix.size(0):].sum()
     else:
         return xNew
 
